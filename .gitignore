@@ -1,0 +1,5 @@
+node_modules/
+lariat.db
+lariat.db-shm
+lariat.db-wal
+.env

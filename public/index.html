@@ -1,0 +1,805 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lariat Pro</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body{background:#0f172a}
+  ::-webkit-scrollbar{width:8px;height:8px}::-webkit-scrollbar-thumb{background:#334155;border-radius:4px}
+  .fade-in{animation:fi .15s ease-out}@keyframes fi{from{opacity:0;transform:translateY(4px)}to{opacity:1}}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useRef, useCallback, useMemo } = React;
+
+/* ------------------------------ api ------------------------------------ */
+let TOKEN = localStorage.getItem("lp_token") || "";
+async function api(path, opts = {}) {
+  const r = await fetch("/api" + path, {
+    method: opts.method || "GET",
+    headers: { "Content-Type": "application/json", ...(TOKEN ? { Authorization: "Bearer " + TOKEN } : {}) },
+    body: opts.body ? JSON.stringify(opts.body) : undefined
+  });
+  const j = await r.json().catch(() => ({}));
+  if (r.status === 401) { localStorage.removeItem("lp_token"); TOKEN = ""; location.reload(); }
+  if (!r.ok) throw new Error(j.error || "Request failed");
+  return j;
+}
+
+/* --------------------------- CSV parsing -------------------------------- */
+function parseCSV(text) {
+  const rows = []; let row = [], field = "", inQ = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQ) {
+      if (c === '"') { if (text[i+1] === '"') { field += '"'; i++; } else inQ = false; }
+      else field += c;
+    } else if (c === '"') inQ = true;
+    else if (c === ",") { row.push(field); field = ""; }
+    else if (c === "\n" || c === "\r") {
+      if (c === "\r" && text[i+1] === "\n") i++;
+      row.push(field); field = "";
+      if (row.some(f => f !== "")) rows.push(row);
+      row = [];
+    } else field += c;
+  }
+  row.push(field); if (row.some(f => f !== "")) rows.push(row);
+  return rows;
+}
+const FIELD_OPTS = [["","— skip —"],["first_name","First Name"],["last_name","Last Name"],["phone","Phone"],["email","Email"],["address","Address"],["city","City"],["state","State"],["zip","Zip"],["tags","Tags"]];
+function guessField(h) {
+  h = h.toLowerCase();
+  if (/first/.test(h)) return "first_name";
+  if (/last|surname/.test(h)) return "last_name";
+  if (/phone|mobile|cell|number/.test(h)) return "phone";
+  if (/mail/.test(h)) return "email";
+  if (/address|street/.test(h)) return "address";
+  if (/city/.test(h)) return "city";
+  if (/state/.test(h)) return "state";
+  if (/zip|postal/.test(h)) return "zip";
+  if (/tag/.test(h)) return "tags";
+  return "";
+}
+
+/* ------------------------------ ui bits --------------------------------- */
+const Btn = ({ children, onClick, kind = "primary", small, disabled, className = "" }) => {
+  const base = { primary:"bg-blue-600 hover:bg-blue-500 text-white", ghost:"bg-slate-700/60 hover:bg-slate-600 text-slate-200",
+    danger:"bg-red-600/90 hover:bg-red-500 text-white", success:"bg-emerald-600 hover:bg-emerald-500 text-white" }[kind];
+  return <button disabled={disabled} onClick={onClick} className={`${base} ${small?"px-2.5 py-1 text-xs":"px-4 py-2 text-sm"} rounded-lg font-semibold disabled:opacity-40 transition ${className}`}>{children}</button>;
+};
+const Input = p => <input {...p} className={`bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-100 w-full focus:outline-none focus:border-blue-500 ${p.className||""}`} />;
+const TA = p => <textarea {...p} className={`bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-100 w-full focus:outline-none focus:border-blue-500 ${p.className||""}`} />;
+const Sel = p => <select {...p} className={`bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-100 w-full focus:outline-none ${p.className||""}`}>{p.children}</select>;
+const Label = ({ children }) => <label className="block text-xs font-semibold text-slate-400 mb-1 mt-3 uppercase tracking-wide">{children}</label>;
+const Card = ({ children, className = "" }) => <div className={`bg-slate-800/70 border border-slate-700 rounded-xl p-4 ${className}`}>{children}</div>;
+function Modal({ title, onClose, children, wide }) {
+  return <div className="fixed inset-0 bg-black/60 z-50 flex items-start justify-center p-4 overflow-y-auto" onClick={onClose}>
+    <div className={`bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full ${wide?"max-w-3xl":"max-w-lg"} mt-10 fade-in`} onClick={e=>e.stopPropagation()}>
+      <div className="flex justify-between items-center mb-4"><h2 className="text-lg font-bold text-white">{title}</h2>
+        <button onClick={onClose} className="text-slate-400 hover:text-white text-xl leading-none">×</button></div>
+      {children}
+    </div></div>;
+}
+function Toast({ msg }) { return msg ? <div className="fixed bottom-6 right-6 bg-slate-700 text-white px-4 py-3 rounded-xl shadow-xl z-50 fade-in text-sm">{msg}</div> : null; }
+const STATUS_COLORS = { new:"bg-slate-600", contacted:"bg-blue-600", responded:"bg-amber-500", hot:"bg-red-500", warm:"bg-orange-500", appointment:"bg-purple-500", contract:"bg-emerald-600", closed:"bg-emerald-700", dead:"bg-slate-700", dnc:"bg-red-900" };
+const STATUSES = Object.keys(STATUS_COLORS);
+const StatusChip = ({ s }) => <span className={`${STATUS_COLORS[s]||"bg-slate-600"} text-white text-[10px] font-bold px-2 py-0.5 rounded-full uppercase`}>{s}</span>;
+const fmtDate = d => { const dt = new Date(d + (d?.includes("Z")?"":"Z")); return dt.toLocaleString([], {month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}); };
+
+/* ------------------------------ App ------------------------------------- */
+function App() {
+  const [boot, setBoot] = useState(null);
+  const [me, setMe] = useState(null);
+  const [market, setMarket] = useState(null);
+  const [tab, setTab] = useState(localStorage.getItem("lp_tab") || "dashboard");
+  const [toast, setToast] = useState("");
+  const say = m => { setToast(m); setTimeout(() => setToast(""), 3500); };
+
+  const loadMe = async () => {
+    const j = await api("/me");
+    setMe(j);
+    const savedM = +localStorage.getItem("lp_market");
+    const m = j.markets.find(x => x.id === savedM) || j.markets[0];
+    setMarket(m || null);
+  };
+  useEffect(() => {
+    fetch("/api/bootstrap").then(r=>r.json()).then(b => {
+      setBoot(b);
+      if (!b.needsSetup && TOKEN) loadMe().catch(()=>{});
+    });
+  }, []);
+  const pickMarket = m => { setMarket(m); localStorage.setItem("lp_market", m.id); };
+  const go = t => { setTab(t); localStorage.setItem("lp_tab", t); };
+
+  if (!boot) return <div className="min-h-screen flex items-center justify-center text-slate-400">Loading…</div>;
+  if (boot.needsSetup) return <Setup onDone={() => setBoot({ needsSetup: false })} />;
+  if (!TOKEN || !me) return <Login onLogin={loadMe} />;
+
+  const isAdmin = me.user.role === "admin";
+  const navItems = [["dashboard","📊","Dashboard"],["leads","👥","Leads"],["campaigns","🚀","Campaigns"],["inbox","💬","Inbox"],["templates","📝","Templates"],["optouts","🚫","Opt-Outs"],["msettings","⚙️","Market Setup"]];
+  const adminItems = [["overview","🏢","All Markets"],["users","🧑‍💼","Team"],["gsettings","🔑","Integrations"]];
+
+  return <div className="min-h-screen flex text-slate-200">
+    {/* sidebar */}
+    <div className="w-56 bg-slate-900 border-r border-slate-800 flex flex-col fixed h-full">
+      <div className="p-4 border-b border-slate-800">
+        <div className="text-xl font-black text-white">🤠 Lariat <span className="text-blue-400">Pro</span></div>
+        <div className="text-[11px] text-slate-500 mt-0.5">SMS + Email Outreach</div>
+      </div>
+      <div className="p-3 border-b border-slate-800">
+        <div className="text-[10px] font-bold text-slate-500 uppercase mb-1.5">Market</div>
+        <div className="space-y-1">
+          {me.markets.map(m => <button key={m.id} onClick={() => pickMarket(m)}
+            className={`w-full text-left px-2.5 py-1.5 rounded-lg text-sm font-semibold flex items-center gap-2 ${market?.id===m.id?"bg-slate-700 text-white":"text-slate-400 hover:bg-slate-800"}`}>
+            <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{background:m.color}}></span><span className="truncate">{m.name}</span>
+          </button>)}
+        </div>
+      </div>
+      <nav className="flex-1 overflow-y-auto p-2">
+        {navItems.map(([k,i,l]) => <button key={k} onClick={() => go(k)}
+          className={`w-full text-left px-3 py-2 rounded-lg text-sm mb-0.5 ${tab===k?"bg-blue-600/20 text-blue-300 font-semibold":"text-slate-400 hover:bg-slate-800"}`}>{i} {l}</button>)}
+        {isAdmin && <div className="mt-3 pt-2 border-t border-slate-800">
+          <div className="text-[10px] font-bold text-slate-500 uppercase px-3 mb-1">Admin</div>
+          {adminItems.map(([k,i,l]) => <button key={k} onClick={() => go(k)}
+            className={`w-full text-left px-3 py-2 rounded-lg text-sm mb-0.5 ${tab===k?"bg-blue-600/20 text-blue-300 font-semibold":"text-slate-400 hover:bg-slate-800"}`}>{i} {l}</button>)}
+        </div>}
+      </nav>
+      <div className="p-3 border-t border-slate-800 text-xs">
+        <div className="font-semibold text-slate-300">{me.user.name}</div>
+        <div className="text-slate-500">{me.user.role}</div>
+        <button className="text-red-400 hover:text-red-300 mt-1" onClick={async()=>{ await api("/logout",{method:"POST"}).catch(()=>{}); localStorage.removeItem("lp_token"); location.reload(); }}>Sign out</button>
+      </div>
+    </div>
+    {/* main */}
+    <div className="flex-1 ml-56 p-6">
+      {market && <div className="flex items-center gap-2 mb-4">
+        <span className="w-3 h-3 rounded-full" style={{background:market.color}}></span>
+        <h1 className="text-lg font-bold text-white">{market.name}</h1>
+        <span className="text-slate-500 text-sm">/ {({dashboard:"Dashboard",leads:"Leads",campaigns:"Campaigns",inbox:"Inbox",templates:"Templates",optouts:"Opt-Outs",msettings:"Market Setup",overview:"All Markets",users:"Team",gsettings:"Integrations"})[tab]}</span>
+      </div>}
+      {tab==="dashboard" && market && <Dashboard market={market} go={go} />}
+      {tab==="leads" && market && <Leads market={market} say={say} />}
+      {tab==="campaigns" && market && <Campaigns market={market} say={say} />}
+      {tab==="inbox" && market && <Inbox market={market} say={say} />}
+      {tab==="templates" && market && <Templates market={market} say={say} />}
+      {tab==="optouts" && market && <OptOuts market={market} say={say} />}
+      {tab==="msettings" && market && <MarketSettings market={market} refresh={loadMe} say={say} isAdmin={isAdmin} />}
+      {tab==="overview" && isAdmin && <Overview />}
+      {tab==="users" && isAdmin && <Users markets={me.markets} say={say} refresh={loadMe} />}
+      {tab==="gsettings" && isAdmin && <GlobalSettings say={say} />}
+    </div>
+    <Toast msg={toast} />
+  </div>;
+}
+
+/* ------------------------- setup & login -------------------------------- */
+function Setup({ onDone }) {
+  const [f, setF] = useState({ name:"", email:"", password:"" });
+  const [err, setErr] = useState("");
+  return <div className="min-h-screen flex items-center justify-center p-4">
+    <Card className="max-w-md w-full">
+      <h1 className="text-2xl font-black text-white mb-1">🤠 Welcome to Lariat Pro</h1>
+      <p className="text-sm text-slate-400 mb-4">Create your admin account. Your four starter markets (Land, Vegas Realtors, Homeowners, Dispo) will be created automatically.</p>
+      <Label>Your name</Label><Input value={f.name} onChange={e=>setF({...f,name:e.target.value})} />
+      <Label>Email</Label><Input value={f.email} onChange={e=>setF({...f,email:e.target.value})} />
+      <Label>Password</Label><Input type="password" value={f.password} onChange={e=>setF({...f,password:e.target.value})} />
+      {err && <div className="text-red-400 text-sm mt-2">{err}</div>}
+      <div className="mt-4"><Btn onClick={async()=>{ try { await api("/setup",{method:"POST",body:f}); onDone(); } catch(e){ setErr(e.message); } }}>Create account →</Btn></div>
+    </Card></div>;
+}
+function Login({ onLogin }) {
+  const [f, setF] = useState({ email:"", password:"" });
+  const [err, setErr] = useState("");
+  const submit = async () => {
+    try { const j = await api("/login",{method:"POST",body:f}); TOKEN = j.token; localStorage.setItem("lp_token", j.token); await onLogin(); }
+    catch(e){ setErr(e.message); }
+  };
+  return <div className="min-h-screen flex items-center justify-center p-4">
+    <Card className="max-w-sm w-full">
+      <h1 className="text-2xl font-black text-white mb-4">🤠 Lariat <span className="text-blue-400">Pro</span></h1>
+      <Label>Email</Label><Input value={f.email} onChange={e=>setF({...f,email:e.target.value})} onKeyDown={e=>e.key==="Enter"&&submit()} />
+      <Label>Password</Label><Input type="password" value={f.password} onChange={e=>setF({...f,password:e.target.value})} onKeyDown={e=>e.key==="Enter"&&submit()} />
+      {err && <div className="text-red-400 text-sm mt-2">{err}</div>}
+      <div className="mt-4"><Btn onClick={submit} className="w-full">Sign in</Btn></div>
+    </Card></div>;
+}
+
+/* ---------------------------- dashboard --------------------------------- */
+function Stat({ label, value, sub, color = "text-white" }) {
+  return <Card><div className="text-xs text-slate-400 font-semibold uppercase">{label}</div>
+    <div className={`text-3xl font-black mt-1 ${color}`}>{(value??0).toLocaleString()}</div>
+    {sub && <div className="text-xs text-slate-500 mt-0.5">{sub}</div>}</Card>;
+}
+function Dashboard({ market, go }) {
+  const [s, setS] = useState(null);
+  useEffect(() => { api(`/markets/${market.id}/stats`).then(setS); }, [market.id]);
+  if (!s) return <div className="text-slate-500">Loading…</div>;
+  const delivRate = s.sent_month ? Math.round(100 * s.delivered_month / s.sent_month) : 0;
+  const respRate = s.sent_month ? Math.round(100 * s.replies_month / s.sent_month) : 0;
+  return <div className="space-y-4 fade-in">
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <Stat label="Leads" value={s.leads} />
+      <Stat label="Sent today" value={s.sent_today} />
+      <Stat label="SMS this month" value={s.sms_month} sub={`${s.email_month.toLocaleString()} emails`} />
+      <Stat label="Unread replies" value={s.unread} color={s.unread?"text-amber-400":"text-white"} />
+    </div>
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <Stat label="Response rate" value={respRate} sub="% of sends this month" color="text-blue-400" />
+      <Stat label="Delivered" value={delivRate} sub="% (needs status webhook)" color="text-emerald-400" />
+      <Stat label="Hot leads" value={s.hot} color="text-red-400" />
+      <Stat label="Opt-outs" value={s.opt_outs} />
+    </div>
+    <Card>
+      <div className="flex justify-between items-center">
+        <div><div className="font-bold text-white">Quick actions</div>
+          <div className="text-xs text-slate-400">{s.active_campaigns} campaign{s.active_campaigns===1?"":"s"} running in this market</div></div>
+        <div className="flex gap-2">
+          <Btn kind="ghost" onClick={()=>go("leads")}>Import leads</Btn>
+          <Btn kind="ghost" onClick={()=>go("inbox")}>Open inbox</Btn>
+          <Btn onClick={()=>go("campaigns")}>New campaign</Btn>
+        </div>
+      </div>
+    </Card>
+  </div>;
+}
+
+/* ------------------------------ leads ----------------------------------- */
+function Leads({ market, say }) {
+  const [data, setData] = useState({ total: 0, leads: [] });
+  const [q, setQ] = useState(""); const [status, setStatus] = useState("");
+  const [page, setPage] = useState(0);
+  const [sel, setSel] = useState(new Set());
+  const [showImport, setShowImport] = useState(false);
+  const [detail, setDetail] = useState(null);
+  const [enroll, setEnroll] = useState(false);
+  const LIMIT = 100;
+  const load = useCallback(() => api(`/markets/${market.id}/leads?q=${encodeURIComponent(q)}&status=${status}&limit=${LIMIT}&offset=${page*LIMIT}`).then(setData), [market.id, q, status, page]);
+  useEffect(() => { load(); setSel(new Set()); }, [load]);
+  const toggleAll = () => setSel(sel.size === data.leads.length ? new Set() : new Set(data.leads.map(l=>l.id)));
+  return <div className="fade-in">
+    <div className="flex flex-wrap gap-2 mb-3 items-center">
+      <Input placeholder="Search name, phone, email, address…" value={q} onChange={e=>{setQ(e.target.value);setPage(0);}} className="max-w-xs" />
+      <Sel value={status} onChange={e=>{setStatus(e.target.value);setPage(0);}} className="max-w-[160px]"><option value="">All statuses</option>{STATUSES.map(s=><option key={s}>{s}</option>)}</Sel>
+      <div className="flex-1"></div>
+      {sel.size>0 && <>
+        <Btn kind="ghost" small onClick={()=>setEnroll(true)}>➕ Add {sel.size} to campaign</Btn>
+        <Btn kind="danger" small onClick={async()=>{ if(!confirm(`Delete ${sel.size} leads?`))return; await api(`/markets/${market.id}/leads/bulk-delete`,{method:"POST",body:{ids:[...sel]}}); say("Deleted"); load(); }}>Delete</Btn>
+      </>}
+      <Btn onClick={()=>setShowImport(true)}>⬆ Import CSV</Btn>
+    </div>
+    <div className="text-xs text-slate-500 mb-2">{data.total.toLocaleString()} leads {sel.size>0 && `· ${sel.size} selected`}</div>
+    <Card className="p-0 overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead><tr className="text-left text-xs text-slate-400 border-b border-slate-700">
+          <th className="p-2.5"><input type="checkbox" checked={sel.size===data.leads.length&&data.leads.length>0} onChange={toggleAll} /></th>
+          <th className="p-2.5">Name</th><th className="p-2.5">Phone</th><th className="p-2.5">Email</th><th className="p-2.5">Address</th><th className="p-2.5">Tags</th><th className="p-2.5">Status</th>
+        </tr></thead>
+        <tbody>{data.leads.map(l => <tr key={l.id} className="border-b border-slate-800 hover:bg-slate-800/50 cursor-pointer" onClick={()=>setDetail(l.id)}>
+          <td className="p-2.5" onClick={e=>e.stopPropagation()}><input type="checkbox" checked={sel.has(l.id)} onChange={()=>{ const n=new Set(sel); n.has(l.id)?n.delete(l.id):n.add(l.id); setSel(n); }} /></td>
+          <td className="p-2.5 font-semibold text-white">{l.first_name} {l.last_name}</td>
+          <td className="p-2.5 text-slate-300">{l.phone}</td>
+          <td className="p-2.5 text-slate-400 max-w-[180px] truncate">{l.email}</td>
+          <td className="p-2.5 text-slate-400 max-w-[220px] truncate">{[l.address,l.city].filter(Boolean).join(", ")}</td>
+          <td className="p-2.5 text-slate-500 text-xs max-w-[120px] truncate">{l.tags}</td>
+          <td className="p-2.5"><StatusChip s={l.status} /></td>
+        </tr>)}</tbody>
+      </table>
+      {data.leads.length===0 && <div className="p-8 text-center text-slate-500">No leads yet. Import a CSV to get started.</div>}
+    </Card>
+    <div className="flex gap-2 mt-3 items-center text-sm text-slate-400">
+      <Btn kind="ghost" small disabled={page===0} onClick={()=>setPage(p=>p-1)}>← Prev</Btn>
+      Page {page+1} of {Math.max(1, Math.ceil(data.total/LIMIT))}
+      <Btn kind="ghost" small disabled={(page+1)*LIMIT>=data.total} onClick={()=>setPage(p=>p+1)}>Next →</Btn>
+    </div>
+    {showImport && <ImportModal market={market} onClose={()=>setShowImport(false)} onDone={r=>{ setShowImport(false); say(`Imported ${r.added} leads (${r.duplicates} duplicates skipped)`); load(); }} />}
+    {detail && <LeadDetail market={market} id={detail} onClose={()=>{setDetail(null);load();}} say={say} />}
+    {enroll && <EnrollModal market={market} leadIds={[...sel]} onClose={()=>setEnroll(false)} onDone={r=>{ setEnroll(false); say(`Enrolled ${r.enrolled} (${r.blocked} blocked/opted-out)`); }} />}
+  </div>;
+}
+function ImportModal({ market, onClose, onDone }) {
+  const [rows, setRows] = useState(null); const [map, setMap] = useState([]);
+  const [tags, setTags] = useState(""); const [busy, setBusy] = useState(false);
+  const onFile = e => {
+    const f = e.target.files[0]; if (!f) return;
+    const rd = new FileReader();
+    rd.onload = () => { const r = parseCSV(rd.result); setRows(r); setMap(r[0].map(guessField)); };
+    rd.readAsText(f);
+  };
+  const doImport = async () => {
+    setBusy(true);
+    const out = rows.slice(1).map(r => {
+      const o = { custom: {} };
+      map.forEach((f, i) => { if (f) o[f] = r[i]; else if (rows[0][i]) o.custom[rows[0][i].toLowerCase().replace(/\W+/g,"_")] = r[i]; });
+      if (tags) o.tags = [o.tags, tags].filter(Boolean).join(",");
+      return o;
+    });
+    // chunked upload
+    let totals = { added:0, duplicates:0, skipped:0 };
+    for (let i = 0; i < out.length; i += 2000) {
+      const r = await api(`/markets/${market.id}/leads/import`, { method:"POST", body:{ rows: out.slice(i, i+2000) } });
+      totals.added += r.added; totals.duplicates += r.duplicates; totals.skipped += r.skipped;
+    }
+    onDone(totals);
+  };
+  return <Modal title="Import leads from CSV" onClose={onClose} wide>
+    {!rows ? <div>
+      <p className="text-sm text-slate-400 mb-3">Upload a CSV. You'll map the columns next. Duplicates (same phone or email already in this market) are skipped automatically.</p>
+      <input type="file" accept=".csv,.txt" onChange={onFile} className="text-sm text-slate-300" />
+    </div> : <div>
+      <p className="text-sm text-slate-400 mb-3">{(rows.length-1).toLocaleString()} rows found. Map each column (unmapped columns are kept as custom fields usable in templates):</p>
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-2 max-h-72 overflow-y-auto">
+        {rows[0].map((h,i) => <div key={i} className="bg-slate-800 rounded-lg p-2">
+          <div className="text-xs font-bold text-slate-300 truncate">{h}</div>
+          <div className="text-[10px] text-slate-500 truncate mb-1">{rows[1]?.[i]}</div>
+          <Sel value={map[i]} onChange={e=>{ const m=[...map]; m[i]=e.target.value; setMap(m); }}>{FIELD_OPTS.map(([v,l])=><option key={v} value={v}>{l}</option>)}</Sel>
+        </div>)}
+      </div>
+      <Label>Add tag to all imported leads (optional)</Label>
+      <Input placeholder="e.g. probate-list-oct" value={tags} onChange={e=>setTags(e.target.value)} />
+      <div className="mt-4 flex gap-2"><Btn onClick={doImport} disabled={busy}>{busy?"Importing…":"Import "+(rows.length-1).toLocaleString()+" leads"}</Btn><Btn kind="ghost" onClick={()=>setRows(null)}>Back</Btn></div>
+    </div>}
+  </Modal>;
+}
+function LeadDetail({ market, id, onClose, say }) {
+  const [l, setL] = useState(null);
+  const load = () => api(`/markets/${market.id}/leads/${id}`).then(setL);
+  useEffect(() => { load(); }, [id]);
+  if (!l) return null;
+  const save = async (patch) => { await api(`/markets/${market.id}/leads/${id}`, { method:"PUT", body: patch }); say("Saved"); load(); };
+  return <Modal title={`${l.first_name} ${l.last_name}`.trim() || l.phone || l.email} onClose={onClose} wide>
+    <div className="grid md:grid-cols-2 gap-4">
+      <div>
+        <Label>Status</Label>
+        <div className="flex flex-wrap gap-1.5">{STATUSES.map(s => <button key={s} onClick={()=>save({status:s})}
+          className={`${STATUS_COLORS[s]} ${l.status===s?"ring-2 ring-white":"opacity-50 hover:opacity-100"} text-white text-[10px] font-bold px-2 py-1 rounded-full uppercase`}>{s}</button>)}</div>
+        <Label>Phone</Label><Input defaultValue={l.phone} onBlur={e=>e.target.value!==l.phone&&save({phone:e.target.value})} />
+        <Label>Email</Label><Input defaultValue={l.email} onBlur={e=>e.target.value!==l.email&&save({email:e.target.value})} />
+        <Label>Address</Label><Input defaultValue={l.address} onBlur={e=>e.target.value!==l.address&&save({address:e.target.value})} />
+        <Label>Tags</Label><Input defaultValue={l.tags} onBlur={e=>e.target.value!==l.tags&&save({tags:e.target.value})} />
+        <Label>Notes</Label><TA rows={4} defaultValue={l.notes} onBlur={e=>e.target.value!==l.notes&&save({notes:e.target.value})} />
+        {Object.keys(JSON.parse(l.custom_json||"{}")).length>0 && <>
+          <Label>Custom fields</Label>
+          <div className="text-xs text-slate-400 space-y-0.5">{Object.entries(JSON.parse(l.custom_json)).map(([k,v])=><div key={k}><span className="text-slate-500">{k}:</span> {v}</div>)}</div></>}
+      </div>
+      <div>
+        <Label>Message history ({l.messages.length})</Label>
+        <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
+          {l.messages.map(m => <div key={m.id} className={`p-2 rounded-lg text-xs ${m.direction==="in"?"bg-slate-700 mr-8":"bg-blue-900/50 ml-8"}`}>
+            <div className="text-slate-400 text-[10px] mb-0.5">{m.direction==="in"?"← Received":"→ Sent"} · {m.channel} · {m.status} · {fmtDate(m.created_at)}</div>
+            {m.subject && <div className="font-bold">{m.subject}</div>}
+            <div className="whitespace-pre-wrap">{m.body}</div>
+          </div>)}
+          {l.messages.length===0 && <div className="text-slate-500 text-sm">No messages yet.</div>}
+        </div>
+      </div>
+    </div>
+  </Modal>;
+}
+function EnrollModal({ market, leadIds, onClose, onDone }) {
+  const [camps, setCamps] = useState([]); const [cid, setCid] = useState("");
+  useEffect(() => { api(`/markets/${market.id}/campaigns`).then(c=>{ setCamps(c); if(c[0]) setCid(c[0].id); }); }, []);
+  return <Modal title={`Add ${leadIds.length} leads to campaign`} onClose={onClose}>
+    {camps.length===0 ? <p className="text-sm text-slate-400">No campaigns in this market yet — create one on the Campaigns tab first.</p> : <>
+      <Label>Campaign</Label>
+      <Sel value={cid} onChange={e=>setCid(e.target.value)}>{camps.map(c=><option key={c.id} value={c.id}>{c.name} ({c.channel}, {c.status})</option>)}</Sel>
+      <div className="mt-4"><Btn onClick={async()=>onDone(await api(`/markets/${market.id}/campaigns/${cid}/enroll`,{method:"POST",body:{lead_ids:leadIds}}))}>Enroll</Btn></div>
+    </>}
+  </Modal>;
+}
+
+/* ---------------------------- campaigns --------------------------------- */
+function Campaigns({ market, say }) {
+  const [camps, setCamps] = useState([]);
+  const [edit, setEdit] = useState(null); // null | "new" | campaign
+  const load = () => api(`/markets/${market.id}/campaigns`).then(setCamps);
+  useEffect(() => { load(); const t = setInterval(load, 10000); return () => clearInterval(t); }, [market.id]);
+  const setStatus = async (c, status) => { await api(`/markets/${market.id}/campaigns/${c.id}`, { method:"PUT", body:{ status } }); say(status==="running"?"Campaign started 🚀":"Campaign "+status); load(); };
+  return <div className="fade-in">
+    <div className="flex justify-between mb-3">
+      <p className="text-sm text-slate-400">Drip sequences with A/B variants, throttling, quiet hours, and automatic stop-on-reply.</p>
+      <Btn onClick={()=>setEdit("new")}>+ New campaign</Btn>
+    </div>
+    <div className="space-y-3">
+      {camps.map(c => {
+        const active = c.counts.active||0, done = c.counts.completed||0, replied = c.counts.replied||0, total = Object.values(c.counts).reduce((a,b)=>a+b,0);
+        return <Card key={c.id}>
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex-1 min-w-[200px]">
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-white">{c.name}</span>
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${c.channel==="sms"?"bg-blue-600":"bg-purple-600"} text-white`}>{c.channel}</span>
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${ {running:"bg-emerald-600",paused:"bg-amber-600",draft:"bg-slate-600",completed:"bg-slate-700"}[c.status] } text-white`}>{c.status}</span>
+              </div>
+              <div className="text-xs text-slate-400 mt-1">{c.steps.length} step{c.steps.length===1?"":"s"} · {c.throttle_per_min}/min · {c.daily_cap.toLocaleString()}/day cap</div>
+            </div>
+            <div className="flex gap-4 text-center text-xs">
+              <div><div className="text-lg font-black text-white">{total.toLocaleString()}</div><div className="text-slate-500">enrolled</div></div>
+              <div><div className="text-lg font-black text-blue-400">{c.sent.toLocaleString()}</div><div className="text-slate-500">sent</div></div>
+              <div><div className="text-lg font-black text-amber-400">{replied.toLocaleString()}</div><div className="text-slate-500">replied</div></div>
+              <div><div className="text-lg font-black text-emerald-400">{active.toLocaleString()}</div><div className="text-slate-500">in queue</div></div>
+            </div>
+            <div className="flex gap-1.5">
+              {c.status!=="running" ? <Btn kind="success" small onClick={()=>setStatus(c,"running")}>▶ Start</Btn>
+                : <Btn kind="ghost" small onClick={()=>setStatus(c,"paused")}>⏸ Pause</Btn>}
+              <Btn kind="ghost" small onClick={()=>setEdit(c)}>Edit</Btn>
+              <Btn kind="danger" small onClick={async()=>{ if(!confirm("Delete campaign? Messages already sent stay in history."))return; await api(`/markets/${market.id}/campaigns/${c.id}`,{method:"DELETE"}); load(); }}>✕</Btn>
+            </div>
+          </div>
+        </Card>; })}
+      {camps.length===0 && <Card className="text-center text-slate-500 py-10">No campaigns yet. Create one, then enroll leads from the Leads tab.</Card>}
+    </div>
+    {edit && <CampaignEditor market={market} campaign={edit==="new"?null:edit} onClose={()=>setEdit(null)} onDone={()=>{ setEdit(null); say("Campaign saved"); load(); }} />}
+  </div>;
+}
+function CampaignEditor({ market, campaign, onClose, onDone }) {
+  const [f, setF] = useState(campaign ? { name:campaign.name, channel:campaign.channel, throttle_per_min:campaign.throttle_per_min, daily_cap:campaign.daily_cap, steps:campaign.steps }
+    : { name:"", channel:"sms", throttle_per_min:20, daily_cap:2000, steps:[{ delay_days:0, variants:[{subject:"",body:""}] }] });
+  const [tpls, setTpls] = useState([]);
+  useEffect(() => { api(`/markets/${market.id}/templates`).then(setTpls); }, []);
+  const upStep = (i, patch) => { const s=[...f.steps]; s[i]={...s[i],...patch}; setF({...f,steps:s}); };
+  const upVar = (i, j, patch) => { const s=[...f.steps]; const v=[...s[i].variants]; v[j]={...v[j],...patch}; s[i]={...s[i],variants:v}; setF({...f,steps:s}); };
+  const save = async () => {
+    const body = { ...f, steps: f.steps };
+    if (campaign) await api(`/markets/${market.id}/campaigns/${campaign.id}`, { method:"PUT", body });
+    else await api(`/markets/${market.id}/campaigns`, { method:"POST", body });
+    onDone();
+  };
+  const mergeHelp = "Merge fields: {{first_name}} {{last_name}} {{address}} {{city}} + any custom CSV column. Spintax: {Hi|Hey|Hello}";
+  return <Modal title={campaign?"Edit campaign":"New campaign"} onClose={onClose} wide>
+    <div className="grid grid-cols-2 gap-3">
+      <div><Label>Name</Label><Input value={f.name} onChange={e=>setF({...f,name:e.target.value})} placeholder="e.g. Vacant Land Blast — Oct" /></div>
+      <div><Label>Channel</Label><Sel value={f.channel} onChange={e=>setF({...f,channel:e.target.value})} disabled={!!campaign}><option value="sms">SMS (Twilio)</option><option value="email">Cold Email (SendGrid/SMTP)</option></Sel></div>
+      <div><Label>Throttle (msgs/minute)</Label><Input type="number" value={f.throttle_per_min} onChange={e=>setF({...f,throttle_per_min:+e.target.value})} /></div>
+      <div><Label>Daily cap (this campaign)</Label><Input type="number" value={f.daily_cap} onChange={e=>setF({...f,daily_cap:+e.target.value})} /></div>
+    </div>
+    <div className="text-[11px] text-slate-500 mt-2">{mergeHelp}</div>
+    <Label>Sequence steps</Label>
+    <div className="space-y-3">
+      {f.steps.map((s,i) => <div key={i} className="bg-slate-800 rounded-xl p-3 border border-slate-700">
+        <div className="flex items-center gap-2 mb-2">
+          <span className="font-bold text-white text-sm">Step {i+1}</span>
+          {i>0 && <><span className="text-xs text-slate-400">send</span>
+            <Input type="number" className="!w-16 text-center" value={s.delay_days} onChange={e=>upStep(i,{delay_days:+e.target.value})} />
+            <span className="text-xs text-slate-400">days after previous step (skipped automatically if they reply)</span></>}
+          <div className="flex-1"></div>
+          {f.steps.length>1 && <Btn kind="danger" small onClick={()=>setF({...f,steps:f.steps.filter((_,x)=>x!==i)})}>remove</Btn>}
+        </div>
+        {s.variants.map((v,j) => <div key={j} className="mb-2 bg-slate-900/60 rounded-lg p-2">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[10px] font-bold text-slate-400 uppercase">Variant {String.fromCharCode(65+j)} {s.variants.length>1 && "(A/B rotated)"}</span>
+            <div className="flex gap-2 items-center">
+              {tpls.filter(t=>t.channel===f.channel).length>0 && <Sel className="!py-1 !text-xs !w-auto" value="" onChange={e=>{ const t=tpls.find(x=>x.id===+e.target.value); if(t) upVar(i,j,{body:t.body,subject:t.subject}); }}>
+                <option value="">insert template…</option>{tpls.filter(t=>t.channel===f.channel).map(t=><option key={t.id} value={t.id}>{t.name}</option>)}</Sel>}
+              {s.variants.length>1 && <button className="text-red-400 text-xs" onClick={()=>upStep(i,{variants:s.variants.filter((_,x)=>x!==j)})}>✕</button>}
+            </div>
+          </div>
+          {f.channel==="email" && <Input className="mb-1" placeholder="Subject line" value={v.subject||""} onChange={e=>upVar(i,j,{subject:e.target.value})} />}
+          <TA rows={3} placeholder={f.channel==="sms"?"{Hi|Hey} {{first_name}}, this is Maher. Are you still the owner of {{address}}? I'd like to make you a cash offer.":"Email body…"} value={v.body} onChange={e=>upVar(i,j,{body:e.target.value})} />
+          <div className="text-[10px] text-slate-500 text-right">{(v.body||"").length} chars{f.channel==="sms" && (v.body||"").length>160 ? ` · ${Math.ceil((v.body||"").length/153)} SMS segments` : ""}</div>
+        </div>)}
+        <Btn kind="ghost" small onClick={()=>upStep(i,{variants:[...s.variants,{subject:"",body:""}]})}>+ A/B variant</Btn>
+      </div>)}
+    </div>
+    <div className="mt-3 flex gap-2">
+      <Btn kind="ghost" onClick={()=>setF({...f,steps:[...f.steps,{delay_days:2,variants:[{subject:"",body:""}]}]})}>+ Add follow-up step</Btn>
+      <div className="flex-1"></div>
+      <Btn onClick={save} disabled={!f.name || f.steps.some(s=>s.variants.some(v=>!v.body))}>Save campaign</Btn>
+    </div>
+  </Modal>;
+}
+
+/* ------------------------------ inbox ----------------------------------- */
+function Inbox({ market, say }) {
+  const [convos, setConvos] = useState([]);
+  const [sel, setSel] = useState(null);
+  const [thread, setThread] = useState([]);
+  const [text, setText] = useState("");
+  const [qr, setQr] = useState([]);
+  const [filter, setFilter] = useState("all");
+  const endRef = useRef();
+  const load = useCallback(() => api(`/markets/${market.id}/inbox`).then(setConvos), [market.id]);
+  useEffect(() => { load(); api(`/markets/${market.id}/quick-replies`).then(setQr); const t = setInterval(load, 15000); return () => clearInterval(t); }, [load]);
+  useEffect(() => { if (!sel) return; const f = () => api(`/markets/${market.id}/inbox/${sel.lead.id}`).then(t => { setThread(t); load(); });
+    f(); const t = setInterval(f, 10000); return () => clearInterval(t); }, [sel?.lead?.id]);
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior:"smooth" }); }, [thread.length]);
+  const send = async () => {
+    if (!text.trim()) return;
+    try { await api(`/markets/${market.id}/inbox/${sel.lead.id}/reply`, { method:"POST", body:{ body:text } }); setText("");
+      const t = await api(`/markets/${market.id}/inbox/${sel.lead.id}`); setThread(t); }
+    catch(e){ say("⚠️ " + e.message); }
+  };
+  const shown = convos.filter(c => filter==="all" || (filter==="unread" && c.unread>0) || (filter==="hot" && c.lead?.status==="hot"));
+  return <div className="flex gap-3 fade-in" style={{height:"calc(100vh - 110px)"}}>
+    <Card className="w-80 shrink-0 p-0 flex flex-col">
+      <div className="p-2.5 border-b border-slate-700 flex gap-1">
+        {["all","unread","hot"].map(fk => <button key={fk} onClick={()=>setFilter(fk)}
+          className={`px-2.5 py-1 rounded-lg text-xs font-semibold capitalize ${filter===fk?"bg-blue-600 text-white":"text-slate-400 hover:bg-slate-700"}`}>{fk}</button>)}
+      </div>
+      <div className="flex-1 overflow-y-auto">
+        {shown.map(c => <button key={c.lead.id} onClick={()=>setSel(c)}
+          className={`w-full text-left p-3 border-b border-slate-800 hover:bg-slate-700/50 ${sel?.lead?.id===c.lead.id?"bg-slate-700/70":""}`}>
+          <div className="flex justify-between items-center">
+            <span className="font-semibold text-white text-sm truncate">{(c.lead.first_name+" "+c.lead.last_name).trim()||c.lead.phone}</span>
+            {c.unread>0 && <span className="bg-blue-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">{c.unread}</span>}
+          </div>
+          <div className="flex items-center gap-1.5 mt-0.5">
+            <StatusChip s={c.lead.status} />
+            <span className="text-xs text-slate-500 truncate">{c.last?.direction==="out"?"You: ":""}{c.last?.body}</span>
+          </div>
+        </button>)}
+        {shown.length===0 && <div className="p-6 text-center text-slate-500 text-sm">No conversations{filter!=="all"?" matching filter":""}.</div>}
+      </div>
+    </Card>
+    <Card className="flex-1 p-0 flex flex-col">
+      {!sel ? <div className="flex-1 flex items-center justify-center text-slate-500">Pick a conversation</div> : <>
+        <div className="p-3 border-b border-slate-700 flex items-center gap-2">
+          <div className="font-bold text-white">{(sel.lead.first_name+" "+sel.lead.last_name).trim()||sel.lead.phone}</div>
+          <span className="text-xs text-slate-500">{sel.lead.phone}</span>
+          <StatusChip s={sel.lead.status} />
+          <div className="flex-1"></div>
+          <Sel className="!w-auto !py-1 !text-xs" value={sel.lead.status} onChange={async e=>{ await api(`/markets/${market.id}/leads/${sel.lead.id}`,{method:"PUT",body:{status:e.target.value}}); setSel({...sel,lead:{...sel.lead,status:e.target.value}}); load(); }}>
+            {STATUSES.map(s=><option key={s}>{s}</option>)}</Sel>
+        </div>
+        <div className="flex-1 overflow-y-auto p-4 space-y-2">
+          {thread.map(m => <div key={m.id} className={`max-w-[75%] p-2.5 rounded-2xl text-sm ${m.direction==="in"?"bg-slate-700 text-slate-100":"bg-blue-600 text-white ml-auto"}`}>
+            <div className="whitespace-pre-wrap">{m.body}</div>
+            <div className={`text-[10px] mt-1 ${m.direction==="in"?"text-slate-400":"text-blue-200"}`}>{fmtDate(m.created_at)}{m.direction==="out" && ` · ${m.status}`}{m.error && ` · ${m.error}`}</div>
+          </div>)}
+          <div ref={endRef}></div>
+        </div>
+        <div className="p-3 border-t border-slate-700">
+          {qr.length>0 && <div className="flex gap-1.5 flex-wrap mb-2">{qr.map(q=><button key={q.id} onClick={()=>setText(q.body)} className="bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs px-2.5 py-1 rounded-full">{q.name}</button>)}</div>}
+          <div className="flex gap-2">
+            <TA rows={2} value={text} onChange={e=>setText(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send();} }} placeholder="Type a reply… ({{first_name}} merge fields work here too)" />
+            <Btn onClick={send}>Send</Btn>
+          </div>
+        </div>
+      </>}
+    </Card>
+  </div>;
+}
+
+/* --------------------------- templates ---------------------------------- */
+function Templates({ market, say }) {
+  const [tpls, setTpls] = useState([]); const [qr, setQr] = useState([]);
+  const [edit, setEdit] = useState(null);
+  const load = () => { api(`/markets/${market.id}/templates`).then(setTpls); api(`/markets/${market.id}/quick-replies`).then(setQr); };
+  useEffect(load, [market.id]);
+  return <div className="grid md:grid-cols-2 gap-4 fade-in">
+    <div>
+      <div className="flex justify-between items-center mb-2"><h2 className="font-bold text-white">Message templates</h2><Btn small onClick={()=>setEdit({channel:"sms",name:"",subject:"",body:""})}>+ New</Btn></div>
+      <div className="space-y-2">{tpls.map(t => <Card key={t.id}>
+        <div className="flex justify-between items-start">
+          <div><span className="font-semibold text-white text-sm">{t.name}</span> <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full uppercase ml-1 ${t.channel==="sms"?"bg-blue-600":"bg-purple-600"} text-white`}>{t.channel}</span>
+            {t.subject && <div className="text-xs text-slate-300 font-semibold mt-1">Subj: {t.subject}</div>}
+            <div className="text-xs text-slate-400 mt-1 whitespace-pre-wrap">{t.body}</div></div>
+          <div className="flex gap-1 shrink-0 ml-2">
+            <Btn kind="ghost" small onClick={()=>setEdit(t)}>Edit</Btn>
+            <Btn kind="danger" small onClick={async()=>{ await api(`/markets/${market.id}/templates/${t.id}`,{method:"DELETE"}); load(); }}>✕</Btn>
+          </div></div>
+      </Card>)}{tpls.length===0 && <Card className="text-slate-500 text-sm">No templates. Templates can be inserted into campaign steps.</Card>}</div>
+    </div>
+    <div>
+      <div className="flex justify-between items-center mb-2"><h2 className="font-bold text-white">Inbox quick replies</h2></div>
+      <Card>
+        <div className="space-y-2 mb-3">{qr.map(q => <div key={q.id} className="flex justify-between items-start bg-slate-800 rounded-lg p-2">
+          <div><div className="text-sm font-semibold text-white">{q.name}</div><div className="text-xs text-slate-400">{q.body}</div></div>
+          <button className="text-red-400 text-xs ml-2" onClick={async()=>{ await api(`/markets/${market.id}/quick-replies/${q.id}`,{method:"DELETE"}); load(); }}>✕</button>
+        </div>)}</div>
+        <QuickReplyForm market={market} onDone={()=>{load(); say("Quick reply added");}} />
+      </Card>
+    </div>
+    {edit && <Modal title={edit.id?"Edit template":"New template"} onClose={()=>setEdit(null)}>
+      <Label>Name</Label><Input value={edit.name} onChange={e=>setEdit({...edit,name:e.target.value})} />
+      <Label>Channel</Label><Sel value={edit.channel} onChange={e=>setEdit({...edit,channel:e.target.value})}><option value="sms">SMS</option><option value="email">Email</option></Sel>
+      {edit.channel==="email" && <><Label>Subject</Label><Input value={edit.subject} onChange={e=>setEdit({...edit,subject:e.target.value})} /></>}
+      <Label>Body</Label><TA rows={5} value={edit.body} onChange={e=>setEdit({...edit,body:e.target.value})} />
+      <div className="text-[11px] text-slate-500 mt-1">Merge: {"{{first_name}} {{address}}"} etc. Spintax: {"{Hi|Hey|Hello}"}</div>
+      <div className="mt-4"><Btn onClick={async()=>{ if(edit.id) await api(`/markets/${market.id}/templates/${edit.id}`,{method:"PUT",body:edit}); else await api(`/markets/${market.id}/templates`,{method:"POST",body:edit}); setEdit(null); load(); say("Template saved"); }}>Save</Btn></div>
+    </Modal>}
+  </div>;
+}
+function QuickReplyForm({ market, onDone }) {
+  const [f, setF] = useState({ name:"", body:"" });
+  return <div className="flex gap-2 items-end">
+    <div className="flex-1"><Input placeholder="Label (e.g. 'Ask price')" value={f.name} onChange={e=>setF({...f,name:e.target.value})} className="mb-1.5" />
+      <Input placeholder="Reply text" value={f.body} onChange={e=>setF({...f,body:e.target.value})} /></div>
+    <Btn small onClick={async()=>{ if(!f.name||!f.body)return; await api(`/markets/${market.id}/quick-replies`,{method:"POST",body:f}); setF({name:"",body:""}); onDone(); }}>Add</Btn>
+  </div>;
+}
+
+/* ---------------------------- opt-outs ---------------------------------- */
+function OptOuts({ market, say }) {
+  const [rows, setRows] = useState([]);
+  const [f, setF] = useState({ channel:"sms", value:"" });
+  const load = () => api(`/markets/${market.id}/optouts`).then(setRows);
+  useEffect(load, [market.id]);
+  return <div className="fade-in max-w-3xl">
+    <Card className="mb-3">
+      <div className="flex gap-2 items-end">
+        <div><Label>Channel</Label><Sel value={f.channel} onChange={e=>setF({...f,channel:e.target.value})}><option value="sms">SMS (phone)</option><option value="email">Email</option></Sel></div>
+        <div className="flex-1"><Label>Phone / email</Label><Input value={f.value} onChange={e=>setF({...f,value:e.target.value})} /></div>
+        <Btn onClick={async()=>{ await api(`/markets/${market.id}/optouts`,{method:"POST",body:f}); setF({...f,value:""}); say("Added to DNC"); load(); }}>Add to DNC</Btn>
+      </div>
+      <p className="text-xs text-slate-500 mt-2">STOP replies and unsubscribe clicks are added automatically. Opted-out contacts are blocked from all campaigns and manual sends.</p>
+    </Card>
+    <Card className="p-0">
+      <table className="w-full text-sm">
+        <thead><tr className="text-left text-xs text-slate-400 border-b border-slate-700"><th className="p-2.5">Channel</th><th className="p-2.5">Value</th><th className="p-2.5">Reason</th><th className="p-2.5">When</th><th></th></tr></thead>
+        <tbody>{rows.map(r => <tr key={r.id} className="border-b border-slate-800">
+          <td className="p-2.5 uppercase text-xs font-bold text-slate-400">{r.channel}</td><td className="p-2.5 text-white">{r.value}</td>
+          <td className="p-2.5 text-slate-400 text-xs">{r.reason}</td><td className="p-2.5 text-slate-500 text-xs">{fmtDate(r.created_at)}</td>
+          <td className="p-2.5 text-right"><button className="text-red-400 text-xs" onClick={async()=>{ if(!confirm("Remove from DNC? Only do this if they explicitly re-opted in."))return; await api(`/markets/${market.id}/optouts/${r.id}`,{method:"DELETE"}); load(); }}>remove</button></td>
+        </tr>)}</tbody>
+      </table>
+      {rows.length===0 && <div className="p-8 text-center text-slate-500">No opt-outs yet.</div>}
+    </Card>
+  </div>;
+}
+
+/* ------------------------- market settings ------------------------------ */
+function MarketSettings({ market, refresh, say, isAdmin }) {
+  const [s, setS] = useState({ ...market.settings });
+  const [name, setName] = useState(market.name);
+  const [color, setColor] = useState(market.color);
+  const [numbers, setNumbers] = useState((market.settings.from_numbers||[]).join("\n"));
+  useEffect(() => { setS({...market.settings}); setName(market.name); setColor(market.color); setNumbers((market.settings.from_numbers||[]).join("\n")); }, [market.id]);
+  const save = async () => {
+    const from_numbers = numbers.split("\n").map(x=>x.trim()).filter(Boolean);
+    await api(`/markets/${market.id}`, { method:"PUT", body:{ ...(isAdmin?{name,color}:{}), settings:{ ...s, from_numbers } } });
+    say("Market saved"); refresh();
+  };
+  return <div className="max-w-2xl fade-in">
+    <Card>
+      {isAdmin && <div className="grid grid-cols-2 gap-3">
+        <div><Label>Market name</Label><Input value={name} onChange={e=>setName(e.target.value)} /></div>
+        <div><Label>Color</Label><input type="color" value={color} onChange={e=>setColor(e.target.value)} className="h-10 w-20 bg-transparent" /></div>
+      </div>}
+      <Label>Twilio phone numbers for this market (one per line, +1XXXXXXXXXX)</Label>
+      <TA rows={4} value={numbers} onChange={e=>setNumbers(e.target.value)} placeholder="+17025551234&#10;+17025555678" />
+      <p className="text-xs text-slate-500 mt-1">Outbound sends rotate round-robin across this pool. Inbound texts to these numbers land in this market's inbox. Rule of thumb for deliverability: ~150–200 sends/day per number.</p>
+      <div className="grid grid-cols-2 gap-3">
+        <div><Label>Daily SMS cap (market)</Label><Input type="number" value={s.daily_sms_cap} onChange={e=>setS({...s,daily_sms_cap:+e.target.value})} /></div>
+        <div><Label>Daily email cap (market)</Label><Input type="number" value={s.daily_email_cap||2000} onChange={e=>setS({...s,daily_email_cap:+e.target.value})} /></div>
+        <div><Label>Quiet hours start sending (hour)</Label><Input type="number" min="0" max="23" value={s.quiet_start} onChange={e=>setS({...s,quiet_start:+e.target.value})} /></div>
+        <div><Label>Stop sending (hour)</Label><Input type="number" min="0" max="23" value={s.quiet_end} onChange={e=>setS({...s,quiet_end:+e.target.value})} /></div>
+        <div><Label>Timezone offset vs UTC (Vegas = -8)</Label><Input type="number" value={s.tz_offset} onChange={e=>setS({...s,tz_offset:+e.target.value})} /></div>
+      </div>
+      <Label>Cold email "From" for this market</Label>
+      <div className="grid grid-cols-2 gap-3">
+        <Input placeholder="From name (e.g. Maher at Lariat Land)" value={s.email_from_name||""} onChange={e=>setS({...s,email_from_name:e.target.value})} />
+        <Input placeholder="from@yourdomain.com (verified in SendGrid)" value={s.email_from||""} onChange={e=>setS({...s,email_from:e.target.value})} />
+      </div>
+      <div className="mt-4"><Btn onClick={save}>Save market settings</Btn></div>
+    </Card>
+  </div>;
+}
+
+/* -------------------------- admin: overview ----------------------------- */
+function Overview() {
+  const [rows, setRows] = useState([]);
+  useEffect(() => { api("/overview").then(setRows); }, []);
+  const tot = k => rows.reduce((a,r)=>a+(r.stats[k]||0),0);
+  return <div className="fade-in">
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+      <Stat label="Total leads" value={tot("leads")} />
+      <Stat label="SMS this month" value={tot("sms_month")} sub={`target pacing: ${Math.round(tot("sms_month")/200000*100)}% of 200k`} color="text-blue-400" />
+      <Stat label="Emails this month" value={tot("email_month")} color="text-purple-400" />
+      <Stat label="Replies this month" value={tot("replies_month")} color="text-amber-400" />
+    </div>
+    <Card className="p-0 overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead><tr className="text-left text-xs text-slate-400 border-b border-slate-700">
+          <th className="p-3">Market</th><th className="p-3">Leads</th><th className="p-3">Sent today</th><th className="p-3">SMS / mo</th><th className="p-3">Email / mo</th><th className="p-3">Replies / mo</th><th className="p-3">Unread</th><th className="p-3">Hot</th><th className="p-3">Opt-outs</th><th className="p-3">Running</th>
+        </tr></thead>
+        <tbody>{rows.map(r => <tr key={r.market.id} className="border-b border-slate-800">
+          <td className="p-3 font-semibold text-white"><span className="inline-block w-2.5 h-2.5 rounded-full mr-2" style={{background:r.market.color}}></span>{r.market.name}</td>
+          {["leads","sent_today","sms_month","email_month","replies_month","unread","hot","opt_outs","active_campaigns"].map(k=><td key={k} className="p-3 text-slate-300">{(r.stats[k]||0).toLocaleString()}</td>)}
+        </tr>)}</tbody>
+      </table>
+    </Card>
+  </div>;
+}
+
+/* --------------------------- admin: users ------------------------------- */
+function Users({ markets, say, refresh }) {
+  const [users, setUsers] = useState([]);
+  const [edit, setEdit] = useState(null);
+  const load = () => api("/users").then(setUsers);
+  useEffect(load, []);
+  return <div className="fade-in max-w-3xl">
+    <div className="flex justify-between mb-3">
+      <p className="text-sm text-slate-400">Each sales rep gets a login and only sees the markets you assign them.</p>
+      <Btn onClick={()=>setEdit({ name:"", email:"", password:"", role:"rep", markets:[] })}>+ Add rep</Btn>
+    </div>
+    <Card className="p-0">
+      <table className="w-full text-sm">
+        <thead><tr className="text-left text-xs text-slate-400 border-b border-slate-700"><th className="p-3">Name</th><th className="p-3">Email</th><th className="p-3">Role</th><th className="p-3">Markets</th><th></th></tr></thead>
+        <tbody>{users.map(u => <tr key={u.id} className="border-b border-slate-800">
+          <td className="p-3 font-semibold text-white">{u.name}</td><td className="p-3 text-slate-300">{u.email}</td>
+          <td className="p-3"><span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase text-white ${u.role==="admin"?"bg-purple-600":"bg-slate-600"}`}>{u.role}</span></td>
+          <td className="p-3 text-xs text-slate-400">{u.role==="admin"?"all":u.markets.map(id=>markets.find(m=>m.id===id)?.name).filter(Boolean).join(", ")||"none"}</td>
+          <td className="p-3 text-right">
+            <Btn kind="ghost" small onClick={()=>setEdit({...u, password:""})}>Edit</Btn>{" "}
+            <Btn kind="danger" small onClick={async()=>{ if(!confirm("Delete user?"))return; await api(`/users/${u.id}`,{method:"DELETE"}); load(); }}>✕</Btn>
+          </td>
+        </tr>)}</tbody>
+      </table>
+    </Card>
+    {edit && <Modal title={edit.id?"Edit user":"Add sales rep"} onClose={()=>setEdit(null)}>
+      <Label>Name</Label><Input value={edit.name} onChange={e=>setEdit({...edit,name:e.target.value})} />
+      {!edit.id && <><Label>Email (their login)</Label><Input value={edit.email} onChange={e=>setEdit({...edit,email:e.target.value})} /></>}
+      <Label>{edit.id?"New password (leave blank to keep)":"Password"}</Label><Input type="password" value={edit.password} onChange={e=>setEdit({...edit,password:e.target.value})} />
+      <Label>Role</Label><Sel value={edit.role} onChange={e=>setEdit({...edit,role:e.target.value})}><option value="rep">Rep (assigned markets only)</option><option value="admin">Admin (everything)</option></Sel>
+      {edit.role==="rep" && <><Label>Markets</Label>
+        <div className="space-y-1">{markets.map(m => <label key={m.id} className="flex items-center gap-2 text-sm text-slate-300">
+          <input type="checkbox" checked={edit.markets.includes(m.id)} onChange={e=>setEdit({...edit, markets: e.target.checked?[...edit.markets,m.id]:edit.markets.filter(x=>x!==m.id)})} />
+          <span className="w-2 h-2 rounded-full" style={{background:m.color}}></span>{m.name}</label>)}</div></>}
+      <div className="mt-4"><Btn onClick={async()=>{
+        try {
+          if (edit.id) await api(`/users/${edit.id}`,{method:"PUT",body:{name:edit.name,role:edit.role,markets:edit.markets,password:edit.password||undefined}});
+          else await api("/users",{method:"POST",body:edit});
+          setEdit(null); say("User saved"); load(); refresh();
+        } catch(e){ say("⚠️ "+e.message); }
+      }}>Save</Btn></div>
+    </Modal>}
+  </div>;
+}
+
+/* ----------------------- admin: integrations ---------------------------- */
+function GlobalSettings({ say }) {
+  const [s, setS] = useState(null);
+  const [smtp, setSmtp] = useState({ host:"", port:587, user:"", pass:"" });
+  const [newMarket, setNewMarket] = useState({ name:"", color:"#f59e0b" });
+  useEffect(() => { api("/settings").then(j => { setS(j); try { const p = JSON.parse(j.smtp_json||"null"); if (p) setSmtp(p); } catch{} }); }, []);
+  if (!s) return <div className="text-slate-500">Loading…</div>;
+  const save = async () => { await api("/settings", { method:"PUT", body:{ ...s, smtp_json: smtp.host ? JSON.stringify(smtp) : "" } }); say("Integrations saved"); };
+  return <div className="max-w-2xl space-y-4 fade-in">
+    <Card>
+      <h2 className="font-bold text-white mb-1">📱 Twilio (SMS)</h2>
+      <p className="text-xs text-slate-400">From <a className="text-blue-400 underline" href="https://console.twilio.com" target="_blank">console.twilio.com</a>. One account powers all markets; numbers are assigned per-market in Market Setup.</p>
+      <Label>Account SID</Label><Input value={s.twilio_sid} onChange={e=>setS({...s,twilio_sid:e.target.value})} placeholder="AC…" />
+      <Label>Auth Token</Label><Input type="password" value={s.twilio_token} onChange={e=>setS({...s,twilio_token:e.target.value})} />
+    </Card>
+    <Card>
+      <h2 className="font-bold text-white mb-1">✉️ Email — SendGrid (primary)</h2>
+      <p className="text-xs text-slate-400">SendGrid is Twilio's email arm. Create an API key at app.sendgrid.com → Settings → API Keys, and verify your sending domain.</p>
+      <Label>SendGrid API key</Label><Input type="password" value={s.sendgrid_key} onChange={e=>setS({...s,sendgrid_key:e.target.value})} placeholder="SG.…" />
+      <h3 className="font-semibold text-slate-300 mt-4 text-sm">SMTP fallback (used only if SendGrid key is blank)</h3>
+      <div className="grid grid-cols-2 gap-2 mt-1">
+        <Input placeholder="SMTP host" value={smtp.host} onChange={e=>setSmtp({...smtp,host:e.target.value})} />
+        <Input placeholder="Port (587)" value={smtp.port} onChange={e=>setSmtp({...smtp,port:e.target.value})} />
+        <Input placeholder="Username" value={smtp.user} onChange={e=>setSmtp({...smtp,user:e.target.value})} />
+        <Input type="password" placeholder="Password" value={smtp.pass} onChange={e=>setSmtp({...smtp,pass:e.target.value})} />
+      </div>
+    </Card>
+    <Card>
+      <h2 className="font-bold text-white mb-1">🌐 Public URL</h2>
+      <p className="text-xs text-slate-400">Where this server is reachable (e.g. https://lariat.up.railway.app). Needed for inbound SMS, delivery receipts, and email unsubscribe links. Set each Twilio number's webhook to <code className="text-blue-300">[public URL]/webhooks/twilio/sms</code>.</p>
+      <Label>Public URL</Label><Input value={s.public_url} onChange={e=>setS({...s,public_url:e.target.value})} placeholder="https://…" />
+    </Card>
+    <div className="flex gap-2">
+      <Btn onClick={save}>Save all integrations</Btn>
+      <Btn kind="ghost" onClick={()=>window.open(`/api/export?token=${TOKEN}`)}>⬇ Download full backup</Btn>
+    </div>
+    <Card>
+      <h2 className="font-bold text-white mb-1">➕ Add a market</h2>
+      <div className="flex gap-2 items-end">
+        <div className="flex-1"><Label>Name</Label><Input value={newMarket.name} onChange={e=>setNewMarket({...newMarket,name:e.target.value})} placeholder="e.g. Phoenix Land" /></div>
+        <div><Label>Color</Label><input type="color" value={newMarket.color} onChange={e=>setNewMarket({...newMarket,color:e.target.value})} className="h-10 w-16 bg-transparent" /></div>
+        <Btn onClick={async()=>{ if(!newMarket.name)return; await api("/markets",{method:"POST",body:newMarket}); say("Market added — reload to see it"); setTimeout(()=>location.reload(), 800); }}>Add</Btn>
+      </div>
+    </Card>
+  </div>;
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>

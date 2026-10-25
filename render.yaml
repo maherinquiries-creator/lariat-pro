@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: lariat-pro
+    runtime: node
+    plan: starter
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: DATA_DIR
+        value: /var/data
+      - key: NODE_VERSION
+        value: "22"
+    disk:
+      name: lariat-data
+      mountPath: /var/data
+      sizeGB: 1
