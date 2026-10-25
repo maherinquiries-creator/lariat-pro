@@ -51,6 +51,7 @@ function openDb() {
   }
 }
 const db = openDb();
+let a2pCache = null;
 
 /* ----------------------------- schema --------------------------------- */
 db.exec(`
@@ -126,6 +127,8 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 CREATE INDEX IF NOT EXISTS idx_msg_market ON messages(market_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_msg_lead ON messages(lead_id);
+CREATE INDEX IF NOT EXISTS idx_msg_campaign ON messages(campaign_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_optouts_market ON opt_outs(market_id, created_at);
 CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, user_id INTEGER, created_at TEXT DEFAULT (datetime('now')));
 `);
 
@@ -171,6 +174,65 @@ async function twilioSend(from, to, body) {
   const j = await r.json();
   if (!r.ok) throw new Error(j.message || "Twilio error " + r.status);
   return j.sid;
+}
+
+function twilioAuthHeader() {
+  const sid = getSetting("twilio_sid"), tok = getSetting("twilio_token");
+  if (!sid || !tok) return null;
+  return "Basic " + Buffer.from(sid + ":" + tok).toString("base64");
+}
+async function twilioGet(url) {
+  const auth = twilioAuthHeader();
+  if (!auth) {
+    const e = new Error("Twilio not configured");
+    e.code = "not_configured";
+    throw e;
+  }
+  let r;
+  try {
+    r = await fetch(url, { headers: { Authorization: auth }, signal: AbortSignal.timeout(12000) });
+  } catch (e) {
+    const err = new Error(e.name === "TimeoutError" || e.name === "AbortError" ? "Twilio request timed out" : (e.message || "Twilio request failed"));
+    err.status = 0;
+    throw err;
+  }
+  const text = await r.text();
+  let json = null;
+  try { json = text ? JSON.parse(text) : null; } catch { json = null; }
+  if (!r.ok) {
+    const err = new Error((json && (json.message || json.detail)) || ("Twilio error " + r.status));
+    err.status = r.status;
+    throw err;
+  }
+  return json || {};
+}
+function twilioRows(page, preferred) {
+  if (!page || typeof page !== "object") return [];
+  if (preferred && Array.isArray(page[preferred])) return page[preferred];
+  if (page.meta && page.meta.key && Array.isArray(page[page.meta.key])) return page[page.meta.key];
+  for (const k of ["data", "services", "compliance", "phone_numbers", "incoming_phone_numbers", "results"]) {
+    if (Array.isArray(page[k])) return page[k];
+  }
+  return [];
+}
+async function twilioCollect(startUrl, preferredKey) {
+  const out = [];
+  let url = startUrl;
+  const origin = new URL(startUrl).origin;
+  const seen = new Set();
+  for (let i = 0; i < 6 && url; i++) {
+    if (seen.has(url)) break;
+    seen.add(url);
+    const page = await twilioGet(url);
+    out.push(...twilioRows(page, preferredKey));
+    const next = (page.meta && page.meta.next_page_url) || page.next_page_uri || null;
+    if (!next) break;
+    url = String(next).startsWith("http") ? String(next) : origin + next;
+  }
+  return out;
+}
+function normalizeUrl(u) {
+  return String(u || "").trim().replace(/\/$/, "").toLowerCase();
 }
 
 let nodemailer = null;
@@ -417,7 +479,7 @@ app.get("/api/markets/:marketId/campaigns", auth, requireMarket, (req, res) => {
     const s = db.prepare("SELECT status, COUNT(*) c FROM campaign_leads WHERE campaign_id=? GROUP BY status").all(c.id);
     c.counts = Object.fromEntries(s.map(r => [r.status, r.c]));
     c.sent = db.prepare("SELECT COUNT(*) c FROM messages WHERE campaign_id=? AND direction='out' AND status NOT IN ('failed','queued')").get(c.id).c;
-    c.replies = db.prepare("SELECT COUNT(DISTINCT lead_id) c FROM messages WHERE campaign_id IS NOT NULL AND direction='in' AND lead_id IN (SELECT lead_id FROM campaign_leads WHERE campaign_id=?)").get(c.id).c;
+    c.replies = db.prepare("SELECT COUNT(DISTINCT lead_id) c FROM messages WHERE direction='in' AND lead_id IN (SELECT lead_id FROM campaign_leads WHERE campaign_id=?)").get(c.id).c;
     c.steps = JSON.parse(c.steps_json);
   }
   res.json(rows);
@@ -507,6 +569,483 @@ app.post("/api/markets/:marketId/inbox/:leadId/reply", auth, requireMarket, asyn
   }
 });
 
+/* ----------------------------- reporting ------------------------------ */
+function pct(num, den) {
+  if (!den) return null;
+  return Math.round((1000 * num) / den) / 10;
+}
+function rangeSpec(range) {
+  const key = range === "7d" || range === "month" ? range : "30d";
+  const label = key === "7d" ? "Last 7 days" : key === "month" ? "This month" : "Last 30 days";
+  function where(col) {
+    if (!/^[A-Za-z_][A-Za-z0-9_.]*$/.test(col)) throw new Error("bad column");
+    if (key === "month") return { sql: `strftime('%Y-%m', ${col}) = strftime('%Y-%m', 'now')`, args: [] };
+    return { sql: `${col} >= datetime('now', ?)`, args: [key === "7d" ? "-7 days" : "-30 days"] };
+  }
+  return { key, label, where };
+}
+function bucketDates(key) {
+  const now = new Date();
+  const end = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const start = key === "month"
+    ? Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)
+    : end - (key === "7d" ? 7 : 30) * 86400000;
+  const out = [];
+  for (let t = start; t <= end; t += 86400000) out.push(new Date(t).toISOString().slice(0, 10));
+  return out;
+}
+const OUTBOUND_OK = "status NOT IN ('failed','queued')";
+function buildMarketReport(mid, spec) {
+  const w = spec.where("created_at");
+  const row = db.prepare(`
+    SELECT
+      COALESCE(SUM(CASE WHEN direction='out' AND ${OUTBOUND_OK} THEN 1 ELSE 0 END), 0) AS sent,
+      COALESCE(SUM(CASE WHEN direction='out' AND channel='sms' AND ${OUTBOUND_OK} THEN 1 ELSE 0 END), 0) AS sms_sent,
+      COALESCE(SUM(CASE WHEN direction='out' AND channel='email' AND ${OUTBOUND_OK} THEN 1 ELSE 0 END), 0) AS email_sent,
+      COALESCE(SUM(CASE WHEN direction='out' AND status='delivered' THEN 1 ELSE 0 END), 0) AS delivered,
+      COALESCE(SUM(CASE WHEN direction='out' AND status='failed' THEN 1 ELSE 0 END), 0) AS failed,
+      COALESCE(SUM(CASE WHEN direction='in' THEN 1 ELSE 0 END), 0) AS replies,
+      COUNT(DISTINCT CASE WHEN direction='in' AND lead_id IS NOT NULL THEN lead_id END) AS unique_replies
+    FROM messages
+    WHERE market_id=? AND ${w.sql}
+  `).get(mid, ...w.args);
+  const n = k => Number(row && row[k] || 0);
+  const sent = n("sent"), delivered = n("delivered"), failed = n("failed");
+  const replies = n("replies"), unique = n("unique_replies");
+  const opt_outs = db.prepare(`SELECT COUNT(*) c FROM opt_outs WHERE market_id=? AND ${w.sql}`).get(mid, ...w.args).c;
+  const leads_added = db.prepare(`SELECT COUNT(*) c FROM leads WHERE market_id=? AND ${w.sql}`).get(mid, ...w.args).c;
+  const today = new Date().toISOString().slice(0, 10);
+  const g = (sql, ...a) => db.prepare(sql).get(...a).c;
+  const snapshot = {
+    leads: g("SELECT COUNT(*) c FROM leads WHERE market_id=?", mid),
+    hot: g("SELECT COUNT(*) c FROM leads WHERE market_id=? AND status='hot'", mid),
+    unread: g("SELECT COUNT(*) c FROM messages WHERE market_id=? AND direction='in' AND read=0", mid),
+    active_campaigns: g("SELECT COUNT(*) c FROM campaigns WHERE market_id=? AND status='running'", mid),
+    sent_today: g(`SELECT COUNT(*) c FROM messages WHERE market_id=? AND direction='out' AND date(created_at)=? AND ${OUTBOUND_OK}`, mid, today)
+  };
+  const byDay = db.prepare(`
+    SELECT date(created_at) AS d,
+      COALESCE(SUM(CASE WHEN direction='out' AND ${OUTBOUND_OK} THEN 1 ELSE 0 END), 0) AS sent,
+      COALESCE(SUM(CASE WHEN direction='out' AND status='delivered' THEN 1 ELSE 0 END), 0) AS delivered,
+      COALESCE(SUM(CASE WHEN direction='in' THEN 1 ELSE 0 END), 0) AS replies
+    FROM messages WHERE market_id=? AND ${w.sql}
+    GROUP BY date(created_at)
+  `).all(mid, ...w.args);
+  const ooDay = db.prepare(`
+    SELECT date(created_at) AS d, COUNT(*) AS c
+    FROM opt_outs WHERE market_id=? AND ${w.sql}
+    GROUP BY date(created_at)
+  `).all(mid, ...w.args);
+  const sentMap = Object.fromEntries(byDay.map(r => [r.d, r]));
+  const ooByDay = Object.fromEntries(ooDay.map(r => [r.d, r.c]));
+  const daily = bucketDates(spec.key).map(d => ({
+    date: d,
+    sent: Number(sentMap[d] ? sentMap[d].sent : 0),
+    delivered: Number(sentMap[d] ? sentMap[d].delivered : 0),
+    replies: Number(sentMap[d] ? sentMap[d].replies : 0),
+    opt_outs: Number(ooByDay[d] || 0)
+  }));
+
+  const cw = spec.where("m.created_at");
+  const camps = db.prepare(`
+    SELECT c.id, c.name, c.channel, c.status,
+      COALESCE(SUM(CASE WHEN m.id IS NOT NULL AND m.direction='out' AND m.status NOT IN ('failed','queued') THEN 1 ELSE 0 END), 0) AS sent,
+      COALESCE(SUM(CASE WHEN m.id IS NOT NULL AND m.direction='out' AND m.status='delivered' THEN 1 ELSE 0 END), 0) AS delivered,
+      COALESCE(SUM(CASE WHEN m.id IS NOT NULL AND m.direction='out' AND m.status='failed' THEN 1 ELSE 0 END), 0) AS failed
+    FROM campaigns c
+    LEFT JOIN messages m ON m.campaign_id=c.id AND ${cw.sql}
+    WHERE c.market_id=?
+    GROUP BY c.id
+    ORDER BY sent DESC, c.id DESC
+  `).all(...cw.args, mid);
+  const rw = spec.where("m.created_at");
+  const replyRows = db.prepare(`
+    SELECT cl.campaign_id AS id,
+      COUNT(m.id) AS replies,
+      COUNT(DISTINCT m.lead_id) AS unique_replies
+    FROM campaign_leads cl
+    JOIN messages m ON m.lead_id=cl.lead_id AND m.market_id=? AND m.direction='in' AND ${rw.sql}
+    GROUP BY cl.campaign_id
+  `).all(mid, ...rw.args);
+  const replyMap = Object.fromEntries(replyRows.map(r => [r.id, r]));
+  const ow = spec.where("o.created_at");
+  const ooRows = db.prepare(`
+    SELECT cl.campaign_id AS id, COUNT(DISTINCT o.id) AS opt_outs
+    FROM campaign_leads cl
+    JOIN campaigns c ON c.id=cl.campaign_id
+    JOIN leads l ON l.id=cl.lead_id
+    JOIN opt_outs o ON o.channel=c.channel
+      AND o.value != ''
+      AND o.value = CASE WHEN c.channel='sms' THEN l.phone ELSE lower(l.email) END
+      AND o.market_id=c.market_id
+      AND ${ow.sql}
+    WHERE c.market_id=?
+    GROUP BY cl.campaign_id
+  `).all(...ow.args, mid);
+  const ooMap = Object.fromEntries(ooRows.map(r => [r.id, r.opt_outs]));
+  const enrollRows = db.prepare(`
+    SELECT cl.campaign_id AS id, COUNT(*) AS enrolled
+    FROM campaign_leads cl
+    JOIN campaigns c ON c.id=cl.campaign_id
+    WHERE c.market_id=?
+    GROUP BY cl.campaign_id
+  `).all(mid);
+  const enrollMap = Object.fromEntries(enrollRows.map(r => [r.id, r.enrolled]));
+  const campaigns = camps.map(c => {
+    const sentN = Number(c.sent || 0);
+    const deliveredN = Number(c.delivered || 0);
+    const uniqueN = Number(replyMap[c.id] ? replyMap[c.id].unique_replies : 0);
+    const repliesN = Number(replyMap[c.id] ? replyMap[c.id].replies : 0);
+    const optN = Number(ooMap[c.id] || 0);
+    return {
+      id: c.id, name: c.name, channel: c.channel, status: c.status,
+      enrolled: Number(enrollMap[c.id] || 0),
+      sent: sentN, delivered: deliveredN, failed: Number(c.failed || 0),
+      replies: repliesN, unique_replies: uniqueN, opt_outs: optN,
+      reply_rate: pct(uniqueN, sentN), delivery_rate: pct(deliveredN, sentN)
+    };
+  });
+
+  const uw = spec.where("m.created_at");
+  const reps = db.prepare(`
+    SELECT u.id, u.name, u.role,
+      COALESCE(SUM(CASE WHEN m.id IS NOT NULL AND m.direction='out' AND m.status NOT IN ('failed','queued') THEN 1 ELSE 0 END), 0) AS sent,
+      COALESCE(SUM(CASE WHEN m.id IS NOT NULL AND m.direction='out' AND m.status='delivered' THEN 1 ELSE 0 END), 0) AS delivered
+    FROM users u
+    LEFT JOIN messages m ON m.user_id=u.id AND m.market_id=? AND ${uw.sql}
+    WHERE u.role='admin' OR u.id IN (SELECT user_id FROM user_markets WHERE market_id=?)
+    GROUP BY u.id
+    ORDER BY sent DESC, u.name COLLATE NOCASE
+  `).all(mid, ...uw.args, mid).map(r => ({
+    id: r.id, name: r.name, role: r.role,
+    sent: Number(r.sent || 0), delivered: Number(r.delivered || 0),
+    delivery_rate: pct(Number(r.delivered || 0), Number(r.sent || 0))
+  }));
+  const unW = spec.where("created_at");
+  const un = db.prepare(`
+    SELECT
+      COALESCE(SUM(CASE WHEN ${OUTBOUND_OK} THEN 1 ELSE 0 END), 0) AS sent,
+      COALESCE(SUM(CASE WHEN status='delivered' THEN 1 ELSE 0 END), 0) AS delivered
+    FROM messages
+    WHERE market_id=? AND user_id IS NULL AND direction='out' AND ${unW.sql}
+  `).get(mid, ...unW.args);
+  const pipeline = db.prepare("SELECT status, COUNT(*) c FROM leads WHERE market_id=? GROUP BY status ORDER BY c DESC").all(mid)
+    .map(r => ({ status: r.status, count: r.c }));
+  const marketRow = db.prepare("SELECT * FROM markets WHERE id=?").get(mid);
+
+  return {
+    range: spec.key,
+    label: spec.label,
+    definitions: {
+      sent: "Outbound messages created in the range, excluding queued and failed.",
+      reply_rate: "Unique leads with an inbound message in the range, divided by sends.",
+      opt_outs: "Opt-out rows created for this market in the range.",
+      reps: "Inbox replies store the sender. Campaign engine sends stay unattributed."
+    },
+    kpis: {
+      sent, sms_sent: n("sms_sent"), email_sent: n("email_sent"),
+      delivered, failed, replies, unique_replies: unique, opt_outs, leads_added,
+      reply_rate: pct(unique, sent),
+      delivery_rate: pct(delivered, sent),
+      opt_out_rate: pct(opt_outs, sent)
+    },
+    snapshot,
+    funnel: [
+      { key: "sent", label: "Sent", value: sent, rate: sent ? 100 : null },
+      { key: "delivered", label: "Delivered", value: delivered, rate: pct(delivered, sent) },
+      { key: "replies", label: "Replied", value: unique, rate: pct(unique, sent) },
+      { key: "opt_outs", label: "Opted out", value: opt_outs, rate: pct(opt_outs, sent) }
+    ],
+    daily,
+    campaigns,
+    reps,
+    unattributed: { sent: Number(un && un.sent || 0), delivered: Number(un && un.delivered || 0) },
+    pipeline,
+    compliance: marketRow ? marketCompliance(marketRow) : null
+  };
+}
+
+/* ------------------------ compliance checklist ------------------------ */
+function marketCompliance(market) {
+  const ms = marketSettings(market);
+  const publicUrl = String(getSetting("public_url") || "").trim().replace(/\/$/, "");
+  const hasTwilio = !!(getSetting("twilio_sid") && getSetting("twilio_token"));
+  const start = Number(ms.quiet_start), end = Number(ms.quiet_end);
+  const quietOk = Number.isFinite(start) && Number.isFinite(end) && start >= 0 && end <= 24 && start < end;
+  const cap = Number(ms.daily_sms_cap);
+  const capOk = Number.isFinite(cap) && cap > 0;
+  const numbers = (ms.from_numbers || []).map(n => String(n).trim()).filter(Boolean);
+  const perNumber = numbers.length && capOk ? Math.round(cap / numbers.length) : null;
+  const tz = Number(ms.tz_offset);
+  const tzLabel = "UTC" + (tz >= 0 ? "+" : "") + (Number.isFinite(tz) ? tz : "?");
+  const pad = n => String(n).padStart(2, "0");
+  let publicState = "warn";
+  let publicDetail = "Set Integrations → Public URL to the https address of this server so inbound texts and delivery receipts can reach it.";
+  if (/^https:\/\//i.test(publicUrl)) {
+    publicState = "pass";
+    publicDetail = "Inbound webhook: " + publicUrl + "/webhooks/twilio/sms";
+  } else if (/^http:\/\//i.test(publicUrl)) {
+    publicDetail = "Public URL is http. Use https in production so Twilio can deliver webhooks.";
+  }
+  const checks = [
+    {
+      id: "quiet_hours", label: "Quiet hours", state: quietOk ? "pass" : "warn",
+      detail: quietOk
+        ? `SMS sends only between ${pad(start)}:00 and ${pad(end)}:00 local (${tzLabel}).`
+        : "Set a sending window with start earlier than end. An inverted window blocks every hour."
+    },
+    {
+      id: "stop", label: "STOP / opt-out", state: "pass",
+      detail: "STOP, STOPALL, UNSUBSCRIBE, CANCEL, END, and QUIT are saved to the opt-out list, the lead is marked DNC, and sequences halt."
+    },
+    {
+      id: "caps", label: "Daily SMS cap", state: capOk ? "pass" : "warn",
+      detail: capOk ? `${cap.toLocaleString()} SMS/day for this market, plus each campaign's own daily cap.` : "Set a market daily SMS cap above 0."
+    },
+    {
+      id: "pacing", label: "Number pacing",
+      state: !numbers.length || !capOk ? "warn" : perNumber > 250 ? "warn" : "pass",
+      detail: !numbers.length
+        ? "Add at least one sending number before judging per-number volume."
+        : !capOk
+          ? "Set a daily cap to judge per-number volume."
+          : perNumber > 250
+            ? `About ${perNumber.toLocaleString()} SMS/day per number at this cap. Many teams stay near 150–200 to protect deliverability.`
+            : `About ${perNumber.toLocaleString()} SMS/day per number at this cap.`
+    },
+    {
+      id: "numbers", label: "Sending numbers", state: numbers.length ? "pass" : "warn",
+      detail: numbers.length
+        ? `${numbers.length} number${numbers.length === 1 ? "" : "s"} in this market's pool. Outbound SMS round-robins across them.`
+        : "Add Twilio numbers in Market Setup, one E.164 number per line."
+    },
+    { id: "public_url", label: "Public URL / webhooks", state: publicState, detail: publicDetail },
+    {
+      id: "twilio", label: "Twilio credentials", state: hasTwilio ? "pass" : "warn",
+      detail: hasTwilio ? "Account SID and auth token are saved." : "An admin needs to add Twilio credentials under Integrations."
+    },
+    {
+      id: "email_unsub", label: "Email unsubscribe", state: "pass",
+      detail: "Cold email adds an unsubscribe link and a List-Unsubscribe header. Clicks are written to the opt-out list."
+    }
+  ];
+  return {
+    market_id: market.id, name: market.name, color: market.color, checks,
+    passing: checks.filter(c => c.state === "pass").length, total: checks.length
+  };
+}
+
+const A2P_DOCS = {
+  a2p: "https://www.twilio.com/docs/messaging/compliance/a2p-10dlc",
+  console: "https://console.twilio.com/us1/develop/sms/regulatory-compliance",
+  brands: "https://console.twilio.com/us1/develop/sms/regulatory-compliance/brands",
+  campaigns: "https://console.twilio.com/us1/develop/sms/regulatory-compliance/campaigns",
+  services: "https://console.twilio.com/us1/develop/sms/services",
+  numbers: "https://console.twilio.com/us1/develop/phone-numbers/manage/incoming"
+};
+const A2P_DISCLAIMER = "Lariat reads Brand and Campaign status from Twilio. Registration and approval stay in the Twilio Console — this app does not submit or approve 10DLC brands or campaigns.";
+
+function complianceShell() {
+  const publicUrl = String(getSetting("public_url") || "").trim().replace(/\/$/, "");
+  return {
+    configured: !!(getSetting("twilio_sid") && getSetting("twilio_token")),
+    public_url: publicUrl,
+    webhook_url: publicUrl ? publicUrl + "/webhooks/twilio/sms" : "",
+    status_callback_url: publicUrl ? publicUrl + "/webhooks/twilio/status" : "",
+    disclaimer: A2P_DISCLAIMER,
+    docs: A2P_DOCS,
+    brands: [],
+    messaging_services: [],
+    numbers: [],
+    markets: db.prepare("SELECT * FROM markets ORDER BY id").all().map(marketCompliance),
+    next_actions: [],
+    errors: [],
+    fetched_at: null
+  };
+}
+function slimBrand(b) {
+  return {
+    sid: b.sid || "",
+    status: b.status || "UNKNOWN",
+    brand_type: b.brand_type || "",
+    identity_status: b.identity_status || "",
+    tcr_id: b.tcr_id || "",
+    brand_score: b.brand_score == null ? null : b.brand_score,
+    failure_reason: b.failure_reason || "",
+    date_updated: b.date_updated || b.date_created || ""
+  };
+}
+function slimCampaign(c) {
+  const errors = Array.isArray(c.errors) ? c.errors.slice(0, 5).map(e => String(typeof e === "string" ? e : (e.description || e.message || "")).slice(0, 200)).filter(Boolean) : [];
+  return {
+    sid: c.sid || "",
+    campaign_id: c.campaign_id || "",
+    campaign_status: c.campaign_status || "UNKNOWN",
+    usecase: c.us_app_to_person_usecase || "",
+    description: String(c.description || "").slice(0, 280),
+    brand_registration_sid: c.brand_registration_sid || "",
+    messaging_service_sid: c.messaging_service_sid || "",
+    has_embedded_links: !!c.has_embedded_links,
+    has_embedded_phone: !!c.has_embedded_phone,
+    errors
+  };
+}
+function webhookState(actual, expected, inAccount) {
+  if (!expected) return "no_public_url";
+  if (!inAccount) return "not_in_account";
+  if (!actual) return "mismatch";
+  return normalizeUrl(actual) === normalizeUrl(expected) ? "match" : "mismatch";
+}
+function buildNextActions({ brands, services, numberAudit, publicUrl, errors }) {
+  const actions = [];
+  const authError = (errors || []).find(e => e.status === 401 || e.status === 403);
+  if (authError) {
+    actions.push({ level: "warn", title: "Twilio rejected these credentials", detail: authError.message || "Check the Account SID and Auth Token, then save and refresh.", href: "https://console.twilio.com/" });
+    return actions;
+  }
+  const brandErr = (errors || []).some(e => e.scope === "brands");
+  if (!brands.length && !brandErr) {
+    actions.push({ level: "warn", title: "Register an A2P Brand", detail: "No Brand registration came back from Twilio. Create the business profile in the Twilio Console. Lariat cannot submit it for you.", href: A2P_DOCS.brands });
+  }
+  for (const b of brands) {
+    const st = String(b.status || "").toUpperCase();
+    if (st !== "APPROVED") {
+      actions.push({ level: "warn", title: `Brand ${b.tcr_id || b.sid || ""} is ${st || "not approved"}`.trim(), detail: b.failure_reason || "Finish or correct this Brand in the Twilio Console. Approval is not done inside Lariat.", href: A2P_DOCS.brands });
+    }
+  }
+  const campaigns = [];
+  for (const s of services) for (const c of s.campaigns) campaigns.push(Object.assign({ service_name: s.friendly_name }, c));
+  const campErr = (errors || []).some(e => e.scope === "campaigns" || e.scope === "services");
+  if (!services.length && !(errors || []).some(e => e.scope === "services")) {
+    actions.push({ level: "warn", title: "Create a Messaging Service", detail: "A2P campaigns attach to a Messaging Service. Create one in the Twilio Console and add this market's numbers to it.", href: A2P_DOCS.services });
+  } else if (services.length && !campaigns.length && !campErr) {
+    actions.push({ level: "warn", title: "Register a 10DLC campaign", detail: "A Messaging Service exists, but no Usa2p campaign is attached yet. Register the use case in the Twilio Console.", href: A2P_DOCS.campaigns });
+  }
+  for (const c of campaigns) {
+    const st = String(c.campaign_status || "").toUpperCase();
+    if (st && st !== "VERIFIED" && st !== "APPROVED") {
+      actions.push({ level: "warn", title: `Campaign ${c.campaign_id || c.sid} is ${st}`, detail: (c.errors && c.errors[0]) || `${c.usecase || "Use case"} on ${c.service_name}. Review it in the Twilio Console.`, href: A2P_DOCS.campaigns });
+    }
+  }
+  const looseNums = [...new Set(numberAudit.filter(n => !n.messaging_service_sid).map(n => n.phone_number))];
+  if (looseNums.length) {
+    actions.push({ level: "warn", title: `${looseNums.length} number${looseNums.length === 1 ? "" : "s"} not on a Messaging Service`, detail: `${looseNums.slice(0, 4).join(", ")}. Attach them to the service that carries your A2P campaign, or carriers may filter the traffic.`, href: A2P_DOCS.services });
+  }
+  const mismatch = numberAudit.filter(n => n.webhook === "mismatch");
+  if (mismatch.length && publicUrl) {
+    actions.push({ level: "warn", title: "Inbound webhook does not match Public URL", detail: `Point “A message comes in” at ${publicUrl}/webhooks/twilio/sms (HTTP POST), on each number or on the Messaging Service.`, href: A2P_DOCS.numbers });
+  }
+  if (!publicUrl) {
+    actions.push({ level: "warn", title: "Set the Public URL", detail: "Integrations → Public URL should be the https address of this server. Lariat uses it for delivery receipts and shows the inbound webhook to paste into Twilio.", href: "" });
+  }
+  if (!actions.length) {
+    actions.push({ level: "pass", title: "Registration looks ready to send", detail: "A Brand is approved, a campaign is on a Messaging Service, and market numbers are attached. Keep quiet hours, STOP handling, and daily caps on. Carrier throughput still follows the campaign Twilio approved.", href: A2P_DOCS.a2p });
+  }
+  return actions.slice(0, 12);
+}
+async function loadA2P() {
+  const shell = complianceShell();
+  const sid = getSetting("twilio_sid");
+  const expectedHook = shell.webhook_url;
+  const errors = [];
+  let brands = [];
+  let services = [];
+  let incoming = [];
+  try {
+    brands = (await twilioCollect("https://messaging.twilio.com/v1/a2p/BrandRegistrations?PageSize=50", "data")).map(slimBrand);
+  } catch (e) {
+    errors.push({ scope: "brands", message: e.message, status: e.status || null });
+  }
+  try {
+    const rawServices = await twilioCollect("https://messaging.twilio.com/v1/Services?PageSize=50", "services");
+    for (const s of rawServices.slice(0, 15)) {
+      let campaigns = [];
+      let numbers = [];
+      try {
+        campaigns = (await twilioCollect(`https://messaging.twilio.com/v1/Services/${encodeURIComponent(s.sid)}/Compliance/Usa2p?PageSize=50`, "compliance")).map(slimCampaign);
+      } catch (e) {
+        errors.push({ scope: "campaigns", service: s.sid, message: e.message, status: e.status || null });
+      }
+      try {
+        numbers = (await twilioCollect(`https://messaging.twilio.com/v1/Services/${encodeURIComponent(s.sid)}/PhoneNumbers?PageSize=100`, "phone_numbers")).map(p => ({
+          sid: p.sid || "", phone_number: p.phone_number || ""
+        }));
+      } catch (e) {
+        errors.push({ scope: "service_numbers", service: s.sid, message: e.message, status: e.status || null });
+      }
+      const inbound = s.inbound_request_url || "";
+      services.push({
+        sid: s.sid,
+        friendly_name: s.friendly_name || s.sid,
+        us_app_to_person_registered: !!s.us_app_to_person_registered,
+        inbound_request_url: inbound,
+        inbound_webhook: webhookState(inbound, expectedHook, true),
+        status_callback: s.status_callback || "",
+        campaigns,
+        phone_numbers: numbers
+      });
+    }
+  } catch (e) {
+    errors.push({ scope: "services", message: e.message, status: e.status || null });
+  }
+  try {
+    incoming = await twilioCollect(`https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(sid)}/IncomingPhoneNumbers.json?PageSize=200`, "incoming_phone_numbers");
+  } catch (e) {
+    errors.push({ scope: "numbers", message: e.message, status: e.status || null });
+  }
+
+  const attached = new Map();
+  for (const s of services) for (const p of s.phone_numbers) {
+    const key = normPhone(p.phone_number) || String(p.phone_number || "").trim();
+    if (key) attached.set(key, { service_sid: s.sid, service_name: s.friendly_name });
+  }
+  const incomingByNum = new Map();
+  for (const n of incoming) {
+    const key = normPhone(n.phone_number) || String(n.phone_number || "").trim();
+    if (key) incomingByNum.set(key, n);
+  }
+  const markets = db.prepare("SELECT * FROM markets ORDER BY id").all();
+  const numberAudit = [];
+  for (const m of markets) {
+    const ms = marketSettings(m);
+    for (const raw of ms.from_numbers || []) {
+      const num = normPhone(raw) || String(raw).trim();
+      if (!num) continue;
+      const inc = incomingByNum.get(num);
+      const att = attached.get(num);
+      const smsUrl = inc ? (inc.sms_url || "") : "";
+      numberAudit.push({
+        phone_number: num,
+        market_id: m.id,
+        market_name: m.name,
+        market_color: m.color,
+        messaging_service_sid: att ? att.service_sid : "",
+        messaging_service_name: att ? att.service_name : "",
+        in_account: !!inc,
+        sms_url: smsUrl,
+        webhook: webhookState(smsUrl, expectedHook, !!inc)
+      });
+    }
+  }
+  shell.brands = brands;
+  shell.messaging_services = services;
+  shell.numbers = numberAudit;
+  shell.errors = errors;
+  shell.next_actions = buildNextActions({ brands, services, numberAudit, publicUrl: shell.public_url, errors });
+  shell.fetched_at = new Date().toISOString();
+  return shell;
+}
+function unconfiguredA2P() {
+  const shell = complianceShell();
+  const hook = shell.webhook_url;
+  shell.next_actions = [
+    { level: "warn", title: "Add Twilio credentials", detail: "Paste the Account SID and Auth Token above and save. Lariat will then read Brand, Campaign, and Messaging Service status. It will not register them for you.", href: "https://console.twilio.com/" },
+    { level: "info", title: "Register in the Twilio Console", detail: "Brand and Campaign approval happens in Twilio Regulatory Compliance. This screen only displays the status afterward.", href: A2P_DOCS.console },
+    { level: "info", title: "Point webhooks at this server", detail: hook ? `Set “A message comes in” to ${hook} (HTTP POST).` : "Set Public URL first, then use /webhooks/twilio/sms as the Twilio inbound webhook.", href: A2P_DOCS.a2p }
+  ];
+  return shell;
+}
+
 /* stats */
 function marketStats(mid) {
   const today = new Date().toISOString().slice(0, 10);
@@ -536,6 +1075,38 @@ app.get("/api/overview", auth, (req, res) => {
   });
   res.json(out);
 });
+app.get("/api/markets/:marketId/reports", auth, requireMarket, (req, res) => {
+  try { res.json(buildMarketReport(req.marketId, rangeSpec(req.query.range))); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get("/api/reports/overview", auth, (req, res) => {
+  try {
+    const spec = rangeSpec(req.query.range);
+    const markets = userMarketIds(req.user).map(mid => {
+      const m = db.prepare("SELECT id, name, color FROM markets WHERE id=?").get(mid);
+      if (!m) return null;
+      const report = buildMarketReport(mid, spec);
+      return { market: m, kpis: report.kpis, snapshot: report.snapshot };
+    }).filter(Boolean);
+    const sum = k => markets.reduce((a, r) => a + Number(r.kpis[k] || 0), 0);
+    const sent = sum("sent");
+    res.json({
+      range: spec.key,
+      label: spec.label,
+      totals: {
+        sent, sms_sent: sum("sms_sent"), email_sent: sum("email_sent"),
+        delivered: sum("delivered"), failed: sum("failed"),
+        replies: sum("replies"), unique_replies: sum("unique_replies"),
+        opt_outs: sum("opt_outs"), leads_added: sum("leads_added"),
+        leads: markets.reduce((a, r) => a + Number(r.snapshot.leads || 0), 0),
+        reply_rate: pct(sum("unique_replies"), sent),
+        delivery_rate: pct(sum("delivered"), sent),
+        opt_out_rate: pct(sum("opt_outs"), sent)
+      },
+      markets
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 
 /* global settings (admin) */
 app.get("/api/settings", auth, admin, (req, res) => {
@@ -544,7 +1115,27 @@ app.get("/api/settings", auth, admin, (req, res) => {
 });
 app.put("/api/settings", auth, admin, (req, res) => {
   for (const [k, v] of Object.entries(req.body)) setSetting(k, v);
+  a2pCache = null;
   res.json({ ok: true });
+});
+app.get("/api/markets/:marketId/compliance", auth, requireMarket, (req, res) => {
+  res.json(marketCompliance(req.market));
+});
+app.get("/api/compliance/a2p", auth, admin, async (req, res) => {
+  if (!getSetting("twilio_sid") || !getSetting("twilio_token")) return res.json(unconfiguredA2P());
+  try {
+    const force = req.query.refresh === "1";
+    if (!force && a2pCache && Date.now() - a2pCache.at < 60 * 1000) return res.json(a2pCache.data);
+    const data = await loadA2P();
+    a2pCache = { at: Date.now(), data };
+    res.json(data);
+  } catch (e) {
+    const shell = complianceShell();
+    shell.errors = [{ scope: "a2p", message: e.message || "Could not reach Twilio" }];
+    shell.next_actions = [{ level: "warn", title: "Could not read A2P status", detail: e.message || "Twilio did not respond. Check the credentials and refresh.", href: "https://console.twilio.com/" }];
+    shell.fetched_at = new Date().toISOString();
+    res.json(shell);
+  }
 });
 app.get("/api/export", auth, admin, (req, res) => {
   const dump = {};
@@ -710,4 +1301,4 @@ setInterval(() => { queueTick().catch(e => console.error("tick", e)); }, 3000);
 /* SPA fallback */
 app.get("*", (req, res) => res.sendFile(path.join(__dirname, "public", "index.html")));
 
-app.listen(PORT, () => console.log(`Lariat Pro running on http://localhost:${PORT}`));
+app.listen(PORT, "0.0.0.0", () => console.log(`Lariat Pro running on http://0.0.0.0:${PORT}`));
