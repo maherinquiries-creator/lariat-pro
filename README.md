@@ -14,7 +14,7 @@ Lariat Pro is a full-stack, multi-market SMS + cold-email outreach platform. One
 
 ## 1. Run it locally (5 minutes)
 
-Requires Node.js 22+ (nodejs.org).
+Requires Node.js 20+ (nodejs.org). Node 22+ can use the built-in `node:sqlite` driver; otherwise the server uses `better-sqlite3`.
 
 ```bash
 cd lariat-pro
@@ -63,12 +63,34 @@ Also strongly consider wholesaling-compliance basics: text only leads you have a
 
 **Fallback:** leave the SendGrid key blank and fill in the SMTP section to send through any other provider (Mailgun, Google Workspace, etc.). Cold-email best practice: keep per-domain volume low (50–200/day per sending domain), warm up new domains gradually.
 
-## 5. Daily workflow for a rep
+## 5. Reporting
+
+Dashboard, Reports, and All Markets read the same message, opt-out, campaign, and user rows. Pick **7 days**, **30 days**, or **this month**.
+
+- **Funnel** — sent → delivered → unique replies → opt-outs. Reply rate is unique leads who wrote in, divided by sends. Delivery rate stays at 0 until Twilio posts status callbacks (that needs the Public URL).
+- **Campaign table** — sent, delivered, replies, opt-outs, and reply rate for each campaign in the open market.
+- **All Markets** — the same totals side by side, scoped to the markets you can access.
+- **Reps** — manual inbox sends are tied to the logged-in user. The campaign engine does not attribute its sends; those sit on an “unattributed” row.
+
+Counts use the time the message or opt-out row was created, not a separate event clock.
+
+## 6. A2P / 10DLC compliance
+
+**Integrations → A2P 10DLC compliance** (admins) is a read-only status panel:
+
+- With a Twilio Account SID and auth token saved, Lariat calls Trust Hub / A2P and Messaging Service APIs and shows Brand status, Usa2p campaign status, and whether each market number is on a Messaging Service.
+- It shows the inbound webhook to paste into Twilio (`[Public URL]/webhooks/twilio/sms`, HTTP POST) and whether the number’s current webhook matches.
+- It does **not** submit or approve Brands or Campaigns. Those steps stay in the Twilio Console; the panel links out and lists the next action.
+- Without credentials, the panel explains what to connect and still shows each market’s local checklist.
+
+**Market Setup** shows that checklist per market, with pass or warn on the guardrails the product already enforces: quiet hours, STOP / opt-out handling, daily cap, per-number pacing, sending numbers, Public URL, Twilio credentials, and email unsubscribe.
+
+## 7. Daily workflow for a rep
 
 1. Log in → their market is already selected.
 2. **Leads** → Import CSV → map columns → tag the list.
 3. **Campaigns** → New campaign → write step 1 (+ A/B variant), add follow-ups ("2 days later"), set throttle.
-4. **Leads** → select → "Add to campaign" → back in Campaigns press **▶ Start**.
+4. **Leads** → select → "Add to campaign" → back in Campaigns press **Start**.
 5. Live in the **Inbox**: replies pause that lead's sequence automatically; set statuses (hot/appointment/contract) as conversations develop.
 
 ## Where things live
@@ -84,4 +106,5 @@ Also strongly consider wholesaling-compliance basics: text only leads you have a
 - **Sends fail with "Twilio not configured"** — fill in Integrations and make sure the market has numbers in Market Setup.
 - **No inbound texts** — the Twilio number's webhook isn't pointed at `/webhooks/twilio/sms`, or Public URL is wrong.
 - **Delivery % shows 0** — delivery receipts need the Public URL set (the app passes a StatusCallback automatically once it is).
+- **A2P panel says Twilio rejected the credentials** — the Account SID or auth token is wrong. Brand and campaign registration itself still happens in the Twilio Console.
 - **Emails land in spam** — authenticate the domain in SendGrid, lower daily volume, warm up.

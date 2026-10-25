@@ -2,15 +2,31 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#070d1a">
 <title>Lariat Pro</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
 <script src="https://cdn.tailwindcss.com"></script>
 <style>
-  body{background:#0f172a}
-  ::-webkit-scrollbar{width:8px;height:8px}::-webkit-scrollbar-thumb{background:#334155;border-radius:4px}
-  .fade-in{animation:fi .15s ease-out}@keyframes fi{from{opacity:0;transform:translateY(4px)}to{opacity:1}}
+  body{
+    background:
+      radial-gradient(1000px 420px at 0% -10%, rgba(37,99,235,.18), transparent 50%),
+      radial-gradient(800px 380px at 100% 0%, rgba(14,165,233,.08), transparent 46%),
+      #070d1a;
+    color:#e8eef8;
+    font-family:Inter,ui-sans-serif,system-ui,-apple-system,sans-serif;
+    min-height:100vh;
+  }
+  input,textarea,select{color-scheme:dark}
+  ::selection{background:rgba(59,130,246,.35)}
+  ::-webkit-scrollbar{width:10px;height:10px}::-webkit-scrollbar-thumb{background:#243044;border-radius:99px}
+  .fade-in{animation:fi .18s ease-out}@keyframes fi{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+  .num{font-variant-numeric:tabular-nums}
+  button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid #3b82f6;outline-offset:2px}
 </style>
 </head>
 <body>
@@ -27,7 +43,12 @@ async function api(path, opts = {}) {
     body: opts.body ? JSON.stringify(opts.body) : undefined
   });
   const j = await r.json().catch(() => ({}));
-  if (r.status === 401) { localStorage.removeItem("lp_token"); TOKEN = ""; location.reload(); }
+  if (r.status === 401) {
+    const had = !!TOKEN;
+    localStorage.removeItem("lp_token");
+    TOKEN = "";
+    if (had) location.reload();
+  }
   if (!r.ok) throw new Error(j.error || "Request failed");
   return j;
 }
@@ -68,39 +89,135 @@ function guessField(h) {
 }
 
 /* ------------------------------ ui bits --------------------------------- */
-const Btn = ({ children, onClick, kind = "primary", small, disabled, className = "" }) => {
-  const base = { primary:"bg-blue-600 hover:bg-blue-500 text-white", ghost:"bg-slate-700/60 hover:bg-slate-600 text-slate-200",
-    danger:"bg-red-600/90 hover:bg-red-500 text-white", success:"bg-emerald-600 hover:bg-emerald-500 text-white" }[kind];
-  return <button disabled={disabled} onClick={onClick} className={`${base} ${small?"px-2.5 py-1 text-xs":"px-4 py-2 text-sm"} rounded-lg font-semibold disabled:opacity-40 transition ${className}`}>{children}</button>;
+const cardCls = "bg-[#10192e]/95 border border-white/[0.07] rounded-2xl shadow-[0_16px_40px_rgba(0,0,0,0.22)]";
+const fieldCls = "bg-[#0b1222] border border-white/10 rounded-lg px-3 py-2 text-sm text-slate-100 w-full placeholder:text-slate-600 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20";
+const Btn = ({ children, onClick, kind = "primary", small, disabled, className = "", type }) => {
+  const base = {
+    primary: "bg-blue-600 hover:bg-blue-500 text-white shadow-sm shadow-blue-950/50",
+    ghost: "bg-white/[0.04] hover:bg-white/[0.08] text-slate-200 border border-white/10",
+    danger: "bg-rose-600/90 hover:bg-rose-500 text-white",
+    success: "bg-emerald-600 hover:bg-emerald-500 text-white"
+  }[kind];
+  return <button type={type || "button"} disabled={disabled} onClick={onClick} className={`${base} ${small ? "px-2.5 py-1 text-xs" : "px-3.5 py-2 text-sm"} rounded-lg font-semibold disabled:opacity-40 transition ${className}`}>{children}</button>;
 };
-const Input = p => <input {...p} className={`bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-100 w-full focus:outline-none focus:border-blue-500 ${p.className||""}`} />;
-const TA = p => <textarea {...p} className={`bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-100 w-full focus:outline-none focus:border-blue-500 ${p.className||""}`} />;
-const Sel = p => <select {...p} className={`bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-100 w-full focus:outline-none ${p.className||""}`}>{p.children}</select>;
-const Label = ({ children }) => <label className="block text-xs font-semibold text-slate-400 mb-1 mt-3 uppercase tracking-wide">{children}</label>;
-const Card = ({ children, className = "" }) => <div className={`bg-slate-800/70 border border-slate-700 rounded-xl p-4 ${className}`}>{children}</div>;
-function Modal({ title, onClose, children, wide }) {
-  return <div className="fixed inset-0 bg-black/60 z-50 flex items-start justify-center p-4 overflow-y-auto" onClick={onClose}>
-    <div className={`bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full ${wide?"max-w-3xl":"max-w-lg"} mt-10 fade-in`} onClick={e=>e.stopPropagation()}>
-      <div className="flex justify-between items-center mb-4"><h2 className="text-lg font-bold text-white">{title}</h2>
-        <button onClick={onClose} className="text-slate-400 hover:text-white text-xl leading-none">×</button></div>
-      {children}
-    </div></div>;
+const Input = ({ className = "", ...p }) => <input {...p} className={`${fieldCls} ${className}`} />;
+const TA = ({ className = "", ...p }) => <textarea {...p} className={`${fieldCls} ${className}`} />;
+const Sel = ({ className = "", children, ...p }) => <select {...p} className={`${fieldCls} ${className}`}>{children}</select>;
+const Label = ({ children }) => <label className="block text-[11px] font-semibold text-slate-500 mb-1 mt-3 uppercase tracking-[0.12em]">{children}</label>;
+const Card = ({ children, className = "" }) => <div className={`${cardCls} p-4 ${className}`}>{children}</div>;
+function Icon({ name, className = "w-[18px] h-[18px]" }) {
+  const p = { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.75, strokeLinecap: "round", strokeLinejoin: "round", className, "aria-hidden": true };
+  if (name === "dashboard") return <svg {...p}><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>;
+  if (name === "reports") return <svg {...p}><path d="M4 19V10"/><path d="M10 19V5"/><path d="M16 19v-6"/><path d="M3 19h18"/></svg>;
+  if (name === "leads") return <svg {...p}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="3"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>;
+  if (name === "campaigns") return <svg {...p}><path d="M4.5 16.5c2-4 4-7 7.5-11 1 3 2 4.5 4 6 1.2.9 2.5 1.2 4 .8-1 3-3 5.2-6.2 6.5-2.2.9-4.4.8-6.8-.2-1.6-.7-2.8-1.4-2.5-2.1z"/><path d="M9 15c.4 1.6 1.4 2.6 3 3"/></svg>;
+  if (name === "inbox") return <svg {...p}><path d="M21 12a8 8 0 0 1-8 8H7l-4 3V12a8 8 0 1 1 18 0z"/></svg>;
+  if (name === "templates") return <svg {...p}><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M8 13h8M8 17h5"/></svg>;
+  if (name === "optouts") return <svg {...p}><circle cx="12" cy="12" r="9"/><path d="M6 6l12 12"/></svg>;
+  if (name === "settings") return <svg {...p}><circle cx="12" cy="12" r="3"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M18.4 5.6 17 7M7 17l-1.4 1.4"/></svg>;
+  if (name === "markets") return <svg {...p}><path d="M3 21h18"/><path d="M6 21V7l6-3 6 3v14"/><path d="M10 21v-5h4v5"/></svg>;
+  if (name === "team") return <svg {...p}><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.5"/><path d="M3 19c.5-2.5 2.8-4 6-4s5.5 1.5 6 4"/><path d="M14 15.2c1.8.3 3.2 1.3 3.8 3.3"/></svg>;
+  if (name === "key") return <svg {...p}><circle cx="8" cy="14" r="4"/><path d="M11.5 12.5 20 4l2 2-2 1-1-1-2 2 1 1-1.5 1.5"/></svg>;
+  if (name === "menu") return <svg {...p}><path d="M4 7h16M4 12h16M4 17h16"/></svg>;
+  return null;
 }
-function Toast({ msg }) { return msg ? <div className="fixed bottom-6 right-6 bg-slate-700 text-white px-4 py-3 rounded-xl shadow-xl z-50 fade-in text-sm">{msg}</div> : null; }
+function Modal({ title, onClose, children, wide }) {
+  useEffect(() => {
+    const onKey = e => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  return <div className="fixed inset-0 bg-black/70 z-50 flex items-start justify-center p-4 overflow-y-auto" onClick={onClose}>
+    <div className={`${cardCls} p-5 md:p-6 w-full ${wide ? "max-w-3xl" : "max-w-lg"} mt-4 md:mt-12 fade-in`} onClick={e => e.stopPropagation()}>
+      <div className="flex justify-between items-center mb-4 gap-3">
+        <h2 className="text-lg font-semibold text-white">{title}</h2>
+        <button type="button" onClick={onClose} className="text-slate-400 hover:text-white text-xl leading-none w-8 h-8 rounded-lg hover:bg-white/5" aria-label="Close">×</button>
+      </div>
+      {children}
+    </div>
+  </div>;
+}
+function Toast({ msg }) { return msg ? <div className="fixed bottom-5 right-5 bg-[#1b2740] border border-white/10 text-white px-4 py-3 rounded-xl shadow-2xl z-[60] fade-in text-sm max-w-sm">{msg}</div> : null; }
+function Empty({ title, body, action, icon = "reports" }) {
+  return <div className="px-6 py-14 text-center">
+    <div className="mx-auto mb-3 h-11 w-11 rounded-2xl border border-white/10 bg-white/[0.03] flex items-center justify-center text-slate-400"><Icon name={icon} className="w-5 h-5" /></div>
+    <div className="font-semibold text-white">{title}</div>
+    {body && <p className="text-sm text-slate-400 mt-1 max-w-md mx-auto">{body}</p>}
+    {action && <div className="mt-4 flex justify-center gap-2">{action}</div>}
+  </div>;
+}
+function Skeleton({ className = "" }) { return <div className={`animate-pulse rounded-2xl bg-white/[0.05] ${className}`} />; }
+function PageHeader({ title, subtitle, actions }) {
+  return <div className="flex flex-wrap items-end justify-between gap-3 mb-5">
+    <div className="min-w-0">
+      <h2 className="text-xl md:text-[1.65rem] font-semibold tracking-tight text-white">{title}</h2>
+      {subtitle && <p className="text-sm text-slate-400 mt-1 max-w-2xl">{subtitle}</p>}
+    </div>
+    {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+  </div>;
+}
+function RangeToggle({ value, onChange }) {
+  return <div className="inline-flex rounded-lg border border-white/10 bg-[#0b1222] p-0.5" role="tablist" aria-label="Time range">
+    {[["7d", "7 days"], ["30d", "30 days"], ["month", "Month"]].map(([k, l]) =>
+      <button type="button" key={k} onClick={() => onChange(k)} className={`px-3 py-1.5 text-xs font-semibold rounded-md ${value === k ? "bg-blue-600 text-white" : "text-slate-400 hover:text-white"}`}>{l}</button>)}
+  </div>;
+}
+function useRange() {
+  const [range, setRange] = useState(localStorage.getItem("lp_range") || "30d");
+  const update = r => { setRange(r); localStorage.setItem("lp_range", r); };
+  return [range, update];
+}
+function useReport(path) {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState("");
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let cancel = false;
+    setLoading(true); setData(null); setErr("");
+    api(path).then(d => { if (!cancel) setData(d); }).catch(e => { if (!cancel) setErr(e.message); }).finally(() => { if (!cancel) setLoading(false); });
+    return () => { cancel = true; };
+  }, [path]);
+  return { data, err, loading };
+}
 const STATUS_COLORS = { new:"bg-slate-600", contacted:"bg-blue-600", responded:"bg-amber-500", hot:"bg-red-500", warm:"bg-orange-500", appointment:"bg-purple-500", contract:"bg-emerald-600", closed:"bg-emerald-700", dead:"bg-slate-700", dnc:"bg-red-900" };
 const STATUSES = Object.keys(STATUS_COLORS);
-const StatusChip = ({ s }) => <span className={`${STATUS_COLORS[s]||"bg-slate-600"} text-white text-[10px] font-bold px-2 py-0.5 rounded-full uppercase`}>{s}</span>;
-const fmtDate = d => { const dt = new Date(d + (d?.includes("Z")?"":"Z")); return dt.toLocaleString([], {month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}); };
+const StatusChip = ({ s }) => <span className={`${STATUS_COLORS[s] || "bg-slate-600"} text-white text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide`}>{s}</span>;
+const fmtDate = d => { if (!d) return ""; const dt = new Date(d + (String(d).includes("T") || String(d).includes("Z") ? "" : "Z")); return Number.isNaN(dt.getTime()) ? d : dt.toLocaleString([], { month:"short", day:"numeric", hour:"numeric", minute:"2-digit" }); };
+const fmtNum = v => Number(v || 0).toLocaleString();
+const fmtRate = v => v == null ? "—" : `${Number(v).toLocaleString(undefined, { maximumFractionDigits: 1 })}%`;
+function prettyToken(s) { return String(s || "").replace(/_/g, " ").toLowerCase().replace(/\b\w/g, c => c.toUpperCase()); }
+function StatusPill({ status }) {
+  const s = String(status || "UNKNOWN").toUpperCase();
+  const good = ["APPROVED", "VERIFIED", "REGISTERED", "PASS", "MATCH", "RUNNING"].includes(s);
+  const bad = ["FAILED", "REJECTED", "SUSPENDED", "MISMATCH"].includes(s);
+  const cls = good ? "bg-emerald-500/15 text-emerald-300 ring-emerald-400/30" : bad ? "bg-rose-500/15 text-rose-300 ring-rose-400/30" : "bg-amber-500/15 text-amber-200 ring-amber-400/30";
+  return <span className={`inline-flex items-center text-[10px] font-bold tracking-wide px-2 py-0.5 rounded-full ring-1 uppercase ${cls}`}>{prettyToken(s)}</span>;
+}
+function Kpi({ label, value, sub, tone }) {
+  const toneCls = { good:"text-emerald-300", warn:"text-amber-300", accent:"text-blue-300", hot:"text-rose-300" }[tone] || "text-white";
+  return <div className={`${cardCls} p-4 min-w-0`}>
+    <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">{label}</div>
+    <div className={`mt-2 text-[1.65rem] leading-none font-semibold num ${toneCls}`}>{value}</div>
+    {sub && <div className="mt-2 text-xs text-slate-500 leading-snug">{sub}</div>}
+  </div>;
+}
+function KpiRowSkeleton() {
+  return <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">{Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-[104px]" />)}</div>;
+}
+const PAGE = { dashboard:"Dashboard", reports:"Reports", leads:"Leads", campaigns:"Campaigns", inbox:"Inbox", templates:"Templates", optouts:"Opt-Outs", msettings:"Market Setup", overview:"All Markets", users:"Team", gsettings:"Integrations" };
+const NAV = [["dashboard","dashboard","Dashboard"],["reports","reports","Reports"],["leads","leads","Leads"],["campaigns","campaigns","Campaigns"],["inbox","inbox","Inbox"],["templates","templates","Templates"],["optouts","optouts","Opt-Outs"],["msettings","settings","Market Setup"]];
+const ADMIN_NAV = [["overview","markets","All Markets"],["users","team","Team"],["gsettings","key","Integrations"]];
 
 /* ------------------------------ App ------------------------------------- */
 function App() {
   const [boot, setBoot] = useState(null);
+  const [authState, setAuthState] = useState("loading");
   const [me, setMe] = useState(null);
   const [market, setMarket] = useState(null);
-  const [tab, setTab] = useState(localStorage.getItem("lp_tab") || "dashboard");
+  const [tab, setTab] = useState(() => PAGE[localStorage.getItem("lp_tab")] ? localStorage.getItem("lp_tab") : "dashboard");
   const [toast, setToast] = useState("");
+  const [navOpen, setNavOpen] = useState(false);
   const say = m => { setToast(m); setTimeout(() => setToast(""), 3500); };
-
   const loadMe = async () => {
     const j = await api("/me");
     setMe(j);
@@ -109,149 +226,379 @@ function App() {
     setMarket(m || null);
   };
   useEffect(() => {
-    fetch("/api/bootstrap").then(r=>r.json()).then(b => {
-      setBoot(b);
-      if (!b.needsSetup && TOKEN) loadMe().catch(()=>{});
-    });
+    (async () => {
+      try {
+        const b = await fetch("/api/bootstrap").then(r => r.json());
+        setBoot(b);
+        if (b.needsSetup) { setAuthState("setup"); return; }
+        if (!TOKEN) { setAuthState("anon"); return; }
+        await loadMe();
+        setAuthState("ready");
+      } catch {
+        setBoot({ needsSetup: false });
+        setAuthState("anon");
+      }
+    })();
   }, []);
-  const pickMarket = m => { setMarket(m); localStorage.setItem("lp_market", m.id); };
-  const go = t => { setTab(t); localStorage.setItem("lp_tab", t); };
+  const pickMarket = m => { setMarket(m); localStorage.setItem("lp_market", m.id); setNavOpen(false); };
+  const go = t => { setTab(t); localStorage.setItem("lp_tab", t); setNavOpen(false); };
 
-  if (!boot) return <div className="min-h-screen flex items-center justify-center text-slate-400">Loading…</div>;
-  if (boot.needsSetup) return <Setup onDone={() => setBoot({ needsSetup: false })} />;
-  if (!TOKEN || !me) return <Login onLogin={loadMe} />;
+  if (authState === "loading" || !boot) return <Splash label="Loading workspace…" />;
+  if (boot.needsSetup) return <Setup onDone={() => { setBoot({ needsSetup: false }); setAuthState("anon"); }} />;
+  if (authState !== "ready" || !me) return <Login onLogin={async () => { await loadMe(); setAuthState("ready"); }} />;
 
   const isAdmin = me.user.role === "admin";
-  const navItems = [["dashboard","📊","Dashboard"],["leads","👥","Leads"],["campaigns","🚀","Campaigns"],["inbox","💬","Inbox"],["templates","📝","Templates"],["optouts","🚫","Opt-Outs"],["msettings","⚙️","Market Setup"]];
-  const adminItems = [["overview","🏢","All Markets"],["users","🧑‍💼","Team"],["gsettings","🔑","Integrations"]];
+  const safeTab = ["overview", "users", "gsettings"].includes(tab) && !isAdmin ? "dashboard" : tab;
+  const navBtn = (k, icon, label) => <button type="button" key={k} onClick={() => go(k)}
+    className={`w-full text-left px-2.5 py-2 rounded-lg text-sm mb-0.5 flex items-center gap-2.5 ${safeTab === k ? "bg-blue-500/15 text-blue-100 font-semibold" : "text-slate-400 hover:bg-white/[0.04] hover:text-slate-200"}`}>
+    <Icon name={icon} className="w-4 h-4 shrink-0" />{label}</button>;
 
-  return <div className="min-h-screen flex text-slate-200">
-    {/* sidebar */}
-    <div className="w-56 bg-slate-900 border-r border-slate-800 flex flex-col fixed h-full">
-      <div className="p-4 border-b border-slate-800">
-        <div className="text-xl font-black text-white">🤠 Lariat <span className="text-blue-400">Pro</span></div>
-        <div className="text-[11px] text-slate-500 mt-0.5">SMS + Email Outreach</div>
+  return <div className="min-h-screen text-slate-200">
+    {navOpen && <button type="button" aria-label="Close menu" className="fixed inset-0 z-30 bg-black/60 md:hidden" onClick={() => setNavOpen(false)} />}
+    <aside className={`fixed z-40 inset-y-0 left-0 w-[248px] bg-[#0b1222] border-r border-white/[0.06] flex flex-col transition-transform duration-200 ${navOpen ? "translate-x-0" : "-translate-x-full"} md:translate-x-0`}>
+      <div className="px-4 py-4 border-b border-white/[0.06]">
+        <div className="flex items-center gap-2.5">
+          <div className="h-9 w-9 rounded-xl bg-blue-500/15 border border-blue-400/20 flex items-center justify-center text-lg">🤠</div>
+          <div>
+            <div className="text-[15px] font-semibold text-white leading-tight">Lariat <span className="text-blue-400">Pro</span></div>
+            <div className="text-[11px] text-slate-500">Outreach console</div>
+          </div>
+        </div>
       </div>
-      <div className="p-3 border-b border-slate-800">
-        <div className="text-[10px] font-bold text-slate-500 uppercase mb-1.5">Market</div>
-        <div className="space-y-1">
-          {me.markets.map(m => <button key={m.id} onClick={() => pickMarket(m)}
-            className={`w-full text-left px-2.5 py-1.5 rounded-lg text-sm font-semibold flex items-center gap-2 ${market?.id===m.id?"bg-slate-700 text-white":"text-slate-400 hover:bg-slate-800"}`}>
-            <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{background:m.color}}></span><span className="truncate">{m.name}</span>
+      <div className="px-3 py-3 border-b border-white/[0.06]">
+        <div className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.14em] mb-1.5 px-1">Market</div>
+        <div className="space-y-0.5 max-h-40 overflow-y-auto">
+          {me.markets.map(m => <button type="button" key={m.id} onClick={() => pickMarket(m)}
+            className={`w-full text-left px-2.5 py-1.5 rounded-lg text-sm font-medium flex items-center gap-2 ${market?.id === m.id ? "bg-white/[0.07] text-white" : "text-slate-400 hover:bg-white/[0.04]"}`}>
+            <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: m.color }}></span><span className="truncate">{m.name}</span>
           </button>)}
+          {me.markets.length === 0 && <div className="text-xs text-slate-500 px-2 py-1">No markets yet</div>}
         </div>
       </div>
       <nav className="flex-1 overflow-y-auto p-2">
-        {navItems.map(([k,i,l]) => <button key={k} onClick={() => go(k)}
-          className={`w-full text-left px-3 py-2 rounded-lg text-sm mb-0.5 ${tab===k?"bg-blue-600/20 text-blue-300 font-semibold":"text-slate-400 hover:bg-slate-800"}`}>{i} {l}</button>)}
-        {isAdmin && <div className="mt-3 pt-2 border-t border-slate-800">
-          <div className="text-[10px] font-bold text-slate-500 uppercase px-3 mb-1">Admin</div>
-          {adminItems.map(([k,i,l]) => <button key={k} onClick={() => go(k)}
-            className={`w-full text-left px-3 py-2 rounded-lg text-sm mb-0.5 ${tab===k?"bg-blue-600/20 text-blue-300 font-semibold":"text-slate-400 hover:bg-slate-800"}`}>{i} {l}</button>)}
+        {NAV.map(([k, icon, label]) => navBtn(k, icon, label))}
+        {isAdmin && <div className="mt-3 pt-3 border-t border-white/[0.06]">
+          <div className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.14em] px-2.5 mb-1">Admin</div>
+          {ADMIN_NAV.map(([k, icon, label]) => navBtn(k, icon, label))}
         </div>}
       </nav>
-      <div className="p-3 border-t border-slate-800 text-xs">
-        <div className="font-semibold text-slate-300">{me.user.name}</div>
-        <div className="text-slate-500">{me.user.role}</div>
-        <button className="text-red-400 hover:text-red-300 mt-1" onClick={async()=>{ await api("/logout",{method:"POST"}).catch(()=>{}); localStorage.removeItem("lp_token"); location.reload(); }}>Sign out</button>
+      <div className="p-3 border-t border-white/[0.06] text-xs">
+        <div className="font-semibold text-slate-200 truncate">{me.user.name}</div>
+        <div className="text-slate-500 truncate">{me.user.email}</div>
+        <div className="mt-1"><span className="uppercase tracking-wide text-[10px] font-bold text-slate-400">{me.user.role}</span></div>
+        <button type="button" className="text-rose-300 hover:text-rose-200 mt-2" onClick={async () => { await api("/logout", { method: "POST" }).catch(() => {}); localStorage.removeItem("lp_token"); TOKEN = ""; location.reload(); }}>Sign out</button>
       </div>
-    </div>
-    {/* main */}
-    <div className="flex-1 ml-56 p-6">
-      {market && <div className="flex items-center gap-2 mb-4">
-        <span className="w-3 h-3 rounded-full" style={{background:market.color}}></span>
-        <h1 className="text-lg font-bold text-white">{market.name}</h1>
-        <span className="text-slate-500 text-sm">/ {({dashboard:"Dashboard",leads:"Leads",campaigns:"Campaigns",inbox:"Inbox",templates:"Templates",optouts:"Opt-Outs",msettings:"Market Setup",overview:"All Markets",users:"Team",gsettings:"Integrations"})[tab]}</span>
-      </div>}
-      {tab==="dashboard" && market && <Dashboard market={market} go={go} />}
-      {tab==="leads" && market && <Leads market={market} say={say} />}
-      {tab==="campaigns" && market && <Campaigns market={market} say={say} />}
-      {tab==="inbox" && market && <Inbox market={market} say={say} />}
-      {tab==="templates" && market && <Templates market={market} say={say} />}
-      {tab==="optouts" && market && <OptOuts market={market} say={say} />}
-      {tab==="msettings" && market && <MarketSettings market={market} refresh={loadMe} say={say} isAdmin={isAdmin} />}
-      {tab==="overview" && isAdmin && <Overview />}
-      {tab==="users" && isAdmin && <Users markets={me.markets} say={say} refresh={loadMe} />}
-      {tab==="gsettings" && isAdmin && <GlobalSettings say={say} />}
+    </aside>
+    <div className="md:pl-[248px] min-h-screen">
+      <header className="sticky top-0 z-20 h-14 flex items-center gap-3 px-4 md:px-6 border-b border-white/[0.06] bg-[#070d1a]/80 backdrop-blur-md">
+        <button type="button" className="md:hidden h-9 w-9 rounded-lg border border-white/10 flex items-center justify-center text-slate-200" onClick={() => setNavOpen(true)} aria-label="Open menu"><Icon name="menu" /></button>
+        {market && <>
+          <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: market.color }}></span>
+          <span className="font-semibold text-white truncate max-w-[40vw]">{market.name}</span>
+          <span className="text-slate-600">/</span>
+        </>}
+        <span className="text-sm text-slate-400 truncate">{PAGE[safeTab]}</span>
+      </header>
+      <main className="p-4 md:p-6 max-w-[1240px]">
+        {safeTab === "dashboard" && market && <MarketReport market={market} variant="dash" go={go} />}
+        {safeTab === "reports" && market && <MarketReport market={market} variant="full" go={go} />}
+        {safeTab === "leads" && market && <Leads market={market} say={say} />}
+        {safeTab === "campaigns" && market && <Campaigns market={market} say={say} />}
+        {safeTab === "inbox" && market && <Inbox market={market} say={say} />}
+        {safeTab === "templates" && market && <Templates market={market} say={say} />}
+        {safeTab === "optouts" && market && <OptOuts market={market} say={say} />}
+        {safeTab === "msettings" && market && <MarketSettings market={market} refresh={loadMe} say={say} isAdmin={isAdmin} go={go} />}
+        {safeTab === "overview" && isAdmin && <Overview />}
+        {safeTab === "users" && isAdmin && <Users markets={me.markets} say={say} refresh={loadMe} />}
+        {safeTab === "gsettings" && isAdmin && <GlobalSettings say={say} />}
+        {!market && !["overview", "users", "gsettings"].includes(safeTab) && <Empty icon="markets" title="No market yet" body="Create a market from Integrations, then assign it to this login." action={isAdmin ? <Btn onClick={() => go("gsettings")}>Open Integrations</Btn> : null} />}
+      </main>
     </div>
     <Toast msg={toast} />
+  </div>;
+}
+function Splash({ label }) {
+  return <div className="min-h-screen flex items-center justify-center p-6">
+    <div className="text-center">
+      <div className="text-2xl font-semibold text-white">Lariat <span className="text-blue-400">Pro</span></div>
+      <div className="text-sm text-slate-500 mt-2">{label}</div>
+    </div>
   </div>;
 }
 
 /* ------------------------- setup & login -------------------------------- */
 function Setup({ onDone }) {
-  const [f, setF] = useState({ name:"", email:"", password:"" });
+  const [f, setF] = useState({ name: "", email: "", password: "" });
   const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
   return <div className="min-h-screen flex items-center justify-center p-4">
-    <Card className="max-w-md w-full">
-      <h1 className="text-2xl font-black text-white mb-1">🤠 Welcome to Lariat Pro</h1>
-      <p className="text-sm text-slate-400 mb-4">Create your admin account. Your four starter markets (Land, Vegas Realtors, Homeowners, Dispo) will be created automatically.</p>
-      <Label>Your name</Label><Input value={f.name} onChange={e=>setF({...f,name:e.target.value})} />
-      <Label>Email</Label><Input value={f.email} onChange={e=>setF({...f,email:e.target.value})} />
-      <Label>Password</Label><Input type="password" value={f.password} onChange={e=>setF({...f,password:e.target.value})} />
-      {err && <div className="text-red-400 text-sm mt-2">{err}</div>}
-      <div className="mt-4"><Btn onClick={async()=>{ try { await api("/setup",{method:"POST",body:f}); onDone(); } catch(e){ setErr(e.message); } }}>Create account →</Btn></div>
-    </Card></div>;
+    <Card className="max-w-md w-full !p-6">
+      <div className="text-2xl font-semibold text-white mb-1">Welcome to Lariat Pro</div>
+      <p className="text-sm text-slate-400 mb-2">Create the admin login. Four starter markets — Land, Vegas Realtors, Homeowners, and Dispo — are created with it.</p>
+      <Label>Your name</Label><Input value={f.name} onChange={e => setF({ ...f, name: e.target.value })} autoComplete="name" />
+      <Label>Email</Label><Input value={f.email} onChange={e => setF({ ...f, email: e.target.value })} autoComplete="username" />
+      <Label>Password</Label><Input type="password" value={f.password} onChange={e => setF({ ...f, password: e.target.value })} autoComplete="new-password" />
+      {err && <div className="text-rose-300 text-sm mt-3">{err}</div>}
+      <div className="mt-5"><Btn className="w-full" disabled={busy} onClick={async () => { setBusy(true); setErr(""); try { await api("/setup", { method: "POST", body: f }); onDone(); } catch (e) { setErr(e.message); } finally { setBusy(false); } }}>{busy ? "Creating…" : "Create account"}</Btn></div>
+    </Card>
+  </div>;
 }
 function Login({ onLogin }) {
-  const [f, setF] = useState({ email:"", password:"" });
+  const [f, setF] = useState({ email: "", password: "" });
   const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
   const submit = async () => {
-    try { const j = await api("/login",{method:"POST",body:f}); TOKEN = j.token; localStorage.setItem("lp_token", j.token); await onLogin(); }
-    catch(e){ setErr(e.message); }
+    setBusy(true); setErr("");
+    try { const j = await api("/login", { method: "POST", body: f }); TOKEN = j.token; localStorage.setItem("lp_token", j.token); await onLogin(); }
+    catch (e) { setErr(e.message); }
+    finally { setBusy(false); }
   };
   return <div className="min-h-screen flex items-center justify-center p-4">
-    <Card className="max-w-sm w-full">
-      <h1 className="text-2xl font-black text-white mb-4">🤠 Lariat <span className="text-blue-400">Pro</span></h1>
-      <Label>Email</Label><Input value={f.email} onChange={e=>setF({...f,email:e.target.value})} onKeyDown={e=>e.key==="Enter"&&submit()} />
-      <Label>Password</Label><Input type="password" value={f.password} onChange={e=>setF({...f,password:e.target.value})} onKeyDown={e=>e.key==="Enter"&&submit()} />
-      {err && <div className="text-red-400 text-sm mt-2">{err}</div>}
-      <div className="mt-4"><Btn onClick={submit} className="w-full">Sign in</Btn></div>
-    </Card></div>;
+    <div className="w-full max-w-sm">
+      <Card className="!p-6">
+        <div className="flex items-center gap-2.5 mb-5">
+          <div className="h-10 w-10 rounded-xl bg-blue-500/15 border border-blue-400/20 flex items-center justify-center text-xl">🤠</div>
+          <div>
+            <h1 className="text-xl font-semibold text-white leading-tight">Lariat <span className="text-blue-400">Pro</span></h1>
+            <div className="text-xs text-slate-500">Sign in to your workspace</div>
+          </div>
+        </div>
+        <Label>Email</Label><Input value={f.email} autoComplete="username" onChange={e => setF({ ...f, email: e.target.value })} onKeyDown={e => e.key === "Enter" && submit()} />
+        <Label>Password</Label><Input type="password" autoComplete="current-password" value={f.password} onChange={e => setF({ ...f, password: e.target.value })} onKeyDown={e => e.key === "Enter" && submit()} />
+        {err && <div className="text-rose-300 text-sm mt-3">{err}</div>}
+        <div className="mt-5"><Btn onClick={submit} disabled={busy} className="w-full">{busy ? "Signing in…" : "Sign in"}</Btn></div>
+      </Card>
+    </div>
+  </div>;
 }
 
-/* ---------------------------- dashboard --------------------------------- */
-function Stat({ label, value, sub, color = "text-white" }) {
-  return <Card><div className="text-xs text-slate-400 font-semibold uppercase">{label}</div>
-    <div className={`text-3xl font-black mt-1 ${color}`}>{(value??0).toLocaleString()}</div>
-    {sub && <div className="text-xs text-slate-500 mt-0.5">{sub}</div>}</Card>;
-}
-function Dashboard({ market, go }) {
-  const [s, setS] = useState(null);
-  useEffect(() => { api(`/markets/${market.id}/stats`).then(setS); }, [market.id]);
-  if (!s) return <div className="text-slate-500">Loading…</div>;
-  const delivRate = s.sent_month ? Math.round(100 * s.delivered_month / s.sent_month) : 0;
-  const respRate = s.sent_month ? Math.round(100 * s.replies_month / s.sent_month) : 0;
-  return <div className="space-y-4 fade-in">
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-      <Stat label="Leads" value={s.leads} />
-      <Stat label="Sent today" value={s.sent_today} />
-      <Stat label="SMS this month" value={s.sms_month} sub={`${s.email_month.toLocaleString()} emails`} />
-      <Stat label="Unread replies" value={s.unread} color={s.unread?"text-amber-400":"text-white"} />
-    </div>
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-      <Stat label="Response rate" value={respRate} sub="% of sends this month" color="text-blue-400" />
-      <Stat label="Delivered" value={delivRate} sub="% (needs status webhook)" color="text-emerald-400" />
-      <Stat label="Hot leads" value={s.hot} color="text-red-400" />
-      <Stat label="Opt-outs" value={s.opt_outs} />
-    </div>
-    <Card>
-      <div className="flex justify-between items-center">
-        <div><div className="font-bold text-white">Quick actions</div>
-          <div className="text-xs text-slate-400">{s.active_campaigns} campaign{s.active_campaigns===1?"":"s"} running in this market</div></div>
-        <div className="flex gap-2">
-          <Btn kind="ghost" onClick={()=>go("leads")}>Import leads</Btn>
-          <Btn kind="ghost" onClick={()=>go("inbox")}>Open inbox</Btn>
-          <Btn onClick={()=>go("campaigns")}>New campaign</Btn>
-        </div>
+/* ---------------------------- reporting --------------------------------- */
+function Funnel({ steps }) {
+  const max = Math.max(1, ...steps.map(s => s.value || 0));
+  const colors = { sent: "bg-blue-500", delivered: "bg-emerald-400", replies: "bg-amber-400", opt_outs: "bg-rose-400" };
+  const empty = steps.every(s => !s.value);
+  return <div>
+    {empty && <p className="text-sm text-slate-500 mb-3">No sends in this range yet. Start a campaign or reply from the inbox and the funnel will fill in.</p>}
+    {steps.map(s => <div key={s.key} className="mb-3 last:mb-0">
+      <div className="flex justify-between text-xs mb-1 gap-3">
+        <span className="text-slate-300 font-medium">{s.label}</span>
+        <span className="num text-white font-semibold">{fmtNum(s.value)} <span className="text-slate-500 font-normal">{s.rate == null || s.key === "sent" ? "" : `· ${fmtRate(s.rate)}`}</span></span>
       </div>
-    </Card>
+      <div className="h-2 rounded-full bg-white/[0.06] overflow-hidden">
+        <div className={`h-full rounded-full ${colors[s.key] || "bg-blue-500"}`} style={{ width: s.value ? `${Math.max(4, (s.value / max) * 100)}%` : "0%" }} />
+      </div>
+    </div>)}
+  </div>;
+}
+function DailyChart({ daily }) {
+  const max = Math.max(1, ...daily.map(d => Math.max(d.sent, d.replies)));
+  const step = daily.length > 16 ? Math.ceil(daily.length / 8) : 1;
+  const any = daily.some(d => d.sent || d.replies || d.opt_outs);
+  if (!any) return <p className="text-sm text-slate-500 py-8 text-center">No activity in this range.</p>;
+  return <div>
+    <div className="flex items-end gap-[3px] h-36">
+      {daily.map(d => <div key={d.date} className="flex-1 h-full flex items-end gap-px min-w-0" title={`${d.date}: ${d.sent} sent, ${d.delivered} delivered, ${d.replies} replies, ${d.opt_outs} opt-outs`}>
+        <div className="flex-1 rounded-sm bg-blue-500/85" style={{ height: `${(d.sent / max) * 100}%`, minHeight: d.sent ? 2 : 0 }} />
+        <div className="flex-1 rounded-sm bg-amber-400/90" style={{ height: `${(d.replies / max) * 100}%`, minHeight: d.replies ? 2 : 0 }} />
+      </div>)}
+    </div>
+    <div className="flex mt-2 text-[10px] text-slate-500 num">
+      {daily.map((d, i) => <div key={d.date} className="flex-1 text-center truncate">{i % step === 0 ? d.date.slice(5) : ""}</div>)}
+    </div>
+    <div className="flex gap-4 mt-2 text-[11px] text-slate-400">
+      <span className="inline-flex items-center gap-1.5"><i className="w-2 h-2 rounded-sm bg-blue-500/85 inline-block" /> Sent</span>
+      <span className="inline-flex items-center gap-1.5"><i className="w-2 h-2 rounded-sm bg-amber-400/90 inline-block" /> Replies</span>
+    </div>
+  </div>;
+}
+function CampaignTable({ rows }) {
+  const [sort, setSort] = useState({ key: "sent", dir: -1 });
+  const sorted = useMemo(() => [...rows].sort((a, b) => {
+    const av = a[sort.key], bv = b[sort.key];
+    if (typeof av === "string" || typeof bv === "string") return String(av || "").localeCompare(String(bv || "")) * (sort.dir === 1 ? 1 : -1);
+    return ((av ?? -1) - (bv ?? -1)) * (sort.dir === 1 ? 1 : -1);
+  }), [rows, sort]);
+  const head = (key, label, align) => <th className={`p-2.5 font-semibold ${align || ""}`}>
+    <button type="button" className="uppercase tracking-wide hover:text-white" onClick={() => setSort(s => ({ key, dir: s.key === key ? -s.dir : (key === "name" ? 1 : -1) }))}>{label}</button>
+  </th>;
+  if (!rows.length) return <Empty icon="campaigns" title="No campaigns yet" body="Create a campaign, enroll leads, and performance for this range will show up here." />;
+  return <div className="overflow-x-auto">
+    <table className="w-full text-[13px] min-w-[760px]">
+      <thead className="text-left text-[11px] text-slate-500"><tr>
+        {head("name", "Campaign")}{head("channel", "Channel")}{head("status", "Status")}
+        {head("sent", "Sent", "text-right")}{head("delivered", "Delivered", "text-right")}{head("unique_replies", "Replies", "text-right")}
+        {head("opt_outs", "Opt-outs", "text-right")}{head("reply_rate", "Reply rate", "text-right")}
+      </tr></thead>
+      <tbody>{sorted.map(c => <tr key={c.id} className="border-t border-white/[0.06] hover:bg-white/[0.02]">
+        <td className="p-2.5"><div className="font-medium text-white">{c.name}</div><div className="text-[11px] text-slate-500">{fmtNum(c.enrolled)} enrolled</div></td>
+        <td className="p-2.5"><span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full uppercase text-white ${c.channel === "sms" ? "bg-blue-600" : "bg-purple-600"}`}>{c.channel}</span></td>
+        <td className="p-2.5"><StatusPill status={c.status} /></td>
+        <td className="p-2.5 text-right num text-slate-200">{fmtNum(c.sent)}</td>
+        <td className="p-2.5 text-right num text-slate-200">{fmtNum(c.delivered)} <span className="text-slate-500 text-[11px]">{fmtRate(c.delivery_rate)}</span></td>
+        <td className="p-2.5 text-right num text-slate-200">{fmtNum(c.unique_replies)}</td>
+        <td className="p-2.5 text-right num text-slate-200">{fmtNum(c.opt_outs)}</td>
+        <td className="p-2.5 text-right num font-semibold text-white">{fmtRate(c.reply_rate)}</td>
+      </tr>)}</tbody>
+    </table>
+  </div>;
+}
+function Pipeline({ pipeline }) {
+  const rows = STATUSES.map(s => ({ status: s, count: (pipeline.find(p => p.status === s) || {}).count || 0 })).filter(p => p.count);
+  const max = Math.max(1, ...rows.map(r => r.count));
+  if (!rows.length) return <p className="text-sm text-slate-500">No leads in this market yet.</p>;
+  return <div className="space-y-2">{rows.map(r => <div key={r.status} className="flex items-center gap-2">
+    <div className="w-24 shrink-0"><StatusChip s={r.status} /></div>
+    <div className="flex-1 h-1.5 rounded-full bg-white/[0.06] overflow-hidden"><div className="h-full rounded-full bg-blue-500/80" style={{ width: `${(r.count / max) * 100}%` }} /></div>
+    <div className="w-12 text-right text-xs num text-slate-300">{fmtNum(r.count)}</div>
+  </div>)}</div>;
+}
+function CheckItem({ check }) {
+  const pass = check.state === "pass";
+  return <div className="flex gap-3 py-2.5 border-b border-white/[0.06] last:border-0">
+    <span className={`mt-0.5 h-5 w-5 shrink-0 rounded-full text-[11px] font-bold flex items-center justify-center ${pass ? "bg-emerald-500/15 text-emerald-300" : "bg-amber-500/15 text-amber-200"}`}>{pass ? "✓" : "!"}</span>
+    <div className="min-w-0">
+      <div className="text-sm font-medium text-white">{check.label}</div>
+      <div className="text-xs text-slate-400 mt-0.5 leading-relaxed">{check.detail}</div>
+    </div>
+  </div>;
+}
+function MarketReport({ market, variant, go }) {
+  const [range, setRange] = useRange();
+  const [tick, setTick] = useState(0);
+  const { data, err, loading } = useReport(`/markets/${market.id}/reports?range=${range}&r=${tick}`);
+  const full = variant === "full";
+  return <div className="fade-in">
+    <PageHeader
+      title={full ? "Reports" : "Dashboard"}
+      subtitle={full ? "Campaign, rep, and funnel detail for this market. Counts follow messages created in the range." : "Send, reply, and opt-out performance for the market you have open."}
+      actions={<RangeToggle value={range} onChange={setRange} />}
+    />
+    {loading && <div className="space-y-3"><KpiRowSkeleton /><div className="grid lg:grid-cols-2 gap-3"><Skeleton className="h-64" /><Skeleton className="h-64" /></div></div>}
+    {err && <Card><div className="text-rose-300 text-sm">{err}</div><div className="mt-3"><Btn kind="ghost" onClick={() => setTick(n => n + 1)}>Retry</Btn></div></Card>}
+    {data && <>
+      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
+        <Kpi label="Sent" value={fmtNum(data.kpis.sent)} sub={`${fmtNum(data.kpis.sms_sent)} SMS · ${fmtNum(data.kpis.email_sent)} email`} tone="accent" />
+        <Kpi label="Delivered" value={fmtRate(data.kpis.delivery_rate)} sub={data.kpis.sent && !data.kpis.delivered ? "Needs the status webhook" : `${fmtNum(data.kpis.delivered)} receipts`} tone="good" />
+        <Kpi label="Replies" value={fmtNum(data.kpis.unique_replies)} sub={`${fmtNum(data.kpis.replies)} inbound messages`} tone="warn" />
+        <Kpi label="Reply rate" value={fmtRate(data.kpis.reply_rate)} sub="Unique leads ÷ sends" />
+        <Kpi label="Opt-outs" value={fmtNum(data.kpis.opt_outs)} sub={fmtRate(data.kpis.opt_out_rate) + " of sends"} tone={data.kpis.opt_outs ? "hot" : undefined} />
+        <Kpi label="Failed" value={fmtNum(data.kpis.failed)} sub="Provider or send errors" />
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
+        <Kpi label="Leads" value={fmtNum(data.snapshot.leads)} sub={`${fmtNum(data.kpis.leads_added)} added in range`} />
+        <Kpi label="Hot" value={fmtNum(data.snapshot.hot)} tone="hot" sub="Current pipeline" />
+        <Kpi label="Unread" value={fmtNum(data.snapshot.unread)} tone={data.snapshot.unread ? "warn" : undefined} sub="Inbound waiting" />
+        <Kpi label="Running" value={fmtNum(data.snapshot.active_campaigns)} sub={`${fmtNum(data.snapshot.sent_today)} sent today`} />
+      </div>
+      <div className="grid lg:grid-cols-5 gap-3 mt-3">
+        <Card className="lg:col-span-2"><div className="text-sm font-semibold text-white mb-3">Funnel</div><Funnel steps={data.funnel} /></Card>
+        <Card className="lg:col-span-3"><div className="text-sm font-semibold text-white mb-3">Activity · {data.label}</div><DailyChart daily={data.daily} /></Card>
+      </div>
+      {!full && <div className="grid lg:grid-cols-5 gap-3 mt-3">
+        <Card className="lg:col-span-3 !p-0">
+          <div className="flex items-center justify-between px-4 pt-4 pb-2">
+            <div className="text-sm font-semibold text-white">Campaign performance</div>
+            <button type="button" className="text-xs text-blue-300 hover:text-blue-200" onClick={() => go("reports")}>Full report</button>
+          </div>
+          <CampaignTable rows={data.campaigns.slice(0, 5)} />
+        </Card>
+        <Card className="lg:col-span-2">
+          <div className="text-sm font-semibold text-white mb-1">Guardrails</div>
+          <div className="text-xs text-slate-500 mb-2">{data.compliance ? `${data.compliance.passing}/${data.compliance.total} passing for this market` : ""}</div>
+          {(data.compliance?.checks || []).filter(c => c.state !== "pass").slice(0, 4).map(c => <CheckItem key={c.id} check={c} />)}
+          {data.compliance && data.compliance.passing === data.compliance.total && <p className="text-sm text-emerald-300">Quiet hours, STOP handling, caps, and webhook settings look ready.</p>}
+          <div className="mt-3"><Btn kind="ghost" small onClick={() => go("msettings")}>Market setup</Btn></div>
+        </Card>
+      </div>}
+      {!full && <Card className="mt-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="font-semibold text-white">Next step</div>
+            <div className="text-xs text-slate-400 mt-0.5">{fmtNum(data.snapshot.active_campaigns)} campaign{data.snapshot.active_campaigns === 1 ? "" : "s"} running in this market.</div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Btn kind="ghost" onClick={() => go("leads")}>Import leads</Btn>
+            <Btn kind="ghost" onClick={() => go("inbox")}>Open inbox</Btn>
+            <Btn onClick={() => go("campaigns")}>New campaign</Btn>
+          </div>
+        </div>
+      </Card>}
+      {full && <>
+        <Card className="mt-3 !p-0">
+          <div className="px-4 pt-4 pb-2 text-sm font-semibold text-white">Campaign performance</div>
+          <CampaignTable rows={data.campaigns} />
+        </Card>
+        <div className="grid lg:grid-cols-2 gap-3 mt-3">
+          <Card>
+            <div className="text-sm font-semibold text-white">Reps</div>
+            <p className="text-xs text-slate-500 mt-1 mb-3">Manual inbox sends are tied to the logged-in user. Campaign engine sends stay on the unattributed row.</p>
+            <RepTable reps={data.reps} unattributed={data.unattributed} />
+          </Card>
+          <Card>
+            <div className="text-sm font-semibold text-white mb-3">Pipeline now</div>
+            <Pipeline pipeline={data.pipeline} />
+          </Card>
+        </div>
+        <Card className="mt-3 !p-0">
+          <div className="px-4 pt-4 pb-2 text-sm font-semibold text-white">Daily breakdown</div>
+          <div className="max-h-72 overflow-auto">
+            <table className="w-full text-[13px]">
+              <thead className="text-left text-[11px] uppercase tracking-wide text-slate-500"><tr>
+                <th className="p-2.5">Date</th><th className="p-2.5 text-right">Sent</th><th className="p-2.5 text-right">Delivered</th><th className="p-2.5 text-right">Replies</th><th className="p-2.5 text-right">Opt-outs</th>
+              </tr></thead>
+              <tbody>{[...data.daily].reverse().map(d => <tr key={d.date} className="border-t border-white/[0.06]">
+                <td className="p-2.5 text-slate-300 num">{d.date}</td>
+                <td className="p-2.5 text-right num">{fmtNum(d.sent)}</td>
+                <td className="p-2.5 text-right num">{fmtNum(d.delivered)}</td>
+                <td className="p-2.5 text-right num">{fmtNum(d.replies)}</td>
+                <td className="p-2.5 text-right num">{fmtNum(d.opt_outs)}</td>
+              </tr>)}</tbody>
+            </table>
+          </div>
+        </Card>
+        <details className="mt-3 text-xs text-slate-500">
+          <summary className="cursor-pointer text-slate-400">How these numbers are counted</summary>
+          <ul className="mt-2 space-y-1 list-disc pl-4 max-w-3xl">
+            <li>{data.definitions.sent}</li>
+            <li>{data.definitions.reply_rate}</li>
+            <li>{data.definitions.opt_outs}</li>
+            <li>{data.definitions.reps} Delivery rate stays at 0 until Twilio posts status callbacks, which needs a Public URL.</li>
+          </ul>
+        </details>
+      </>}
+    </>}
+  </div>;
+}
+function RepTable({ reps, unattributed }) {
+  const any = (reps || []).some(r => r.sent) || (unattributed && unattributed.sent);
+  if (!any) return <p className="text-sm text-slate-500">No attributed sends in this range. Inbox replies will land here.</p>;
+  return <div className="overflow-x-auto">
+    <table className="w-full text-[13px]">
+      <thead className="text-left text-[11px] uppercase tracking-wide text-slate-500"><tr>
+        <th className="pb-2">Name</th><th className="pb-2">Role</th><th className="pb-2 text-right">Sends</th><th className="pb-2 text-right">Delivered</th>
+      </tr></thead>
+      <tbody>
+        {reps.map(r => <tr key={r.id} className="border-t border-white/[0.06]">
+          <td className="py-2 text-white font-medium">{r.name}</td>
+          <td className="py-2 text-slate-400 uppercase text-[10px] font-bold">{r.role}</td>
+          <td className="py-2 text-right num">{fmtNum(r.sent)}</td>
+          <td className="py-2 text-right num">{fmtNum(r.delivered)}</td>
+        </tr>)}
+        {unattributed && unattributed.sent > 0 && <tr className="border-t border-white/[0.06]">
+          <td className="py-2 text-slate-300">Campaign engine</td>
+          <td className="py-2 text-slate-500 text-[10px] uppercase font-bold">Unattributed</td>
+          <td className="py-2 text-right num">{fmtNum(unattributed.sent)}</td>
+          <td className="py-2 text-right num">{fmtNum(unattributed.delivered)}</td>
+        </tr>}
+      </tbody>
+    </table>
   </div>;
 }
 
 /* ------------------------------ leads ----------------------------------- */
 function Leads({ market, say }) {
   const [data, setData] = useState({ total: 0, leads: [] });
+  const [loading, setLoading] = useState(true);
   const [q, setQ] = useState(""); const [status, setStatus] = useState("");
   const [page, setPage] = useState(0);
   const [sel, setSel] = useState(new Set());
@@ -259,47 +606,55 @@ function Leads({ market, say }) {
   const [detail, setDetail] = useState(null);
   const [enroll, setEnroll] = useState(false);
   const LIMIT = 100;
-  const load = useCallback(() => api(`/markets/${market.id}/leads?q=${encodeURIComponent(q)}&status=${status}&limit=${LIMIT}&offset=${page*LIMIT}`).then(setData), [market.id, q, status, page]);
+  const load = useCallback(() => {
+    setLoading(true);
+    return api(`/markets/${market.id}/leads?q=${encodeURIComponent(q)}&status=${status}&limit=${LIMIT}&offset=${page * LIMIT}`)
+      .then(setData).catch(e => say(e.message)).finally(() => setLoading(false));
+  }, [market.id, q, status, page]);
   useEffect(() => { load(); setSel(new Set()); }, [load]);
-  const toggleAll = () => setSel(sel.size === data.leads.length ? new Set() : new Set(data.leads.map(l=>l.id)));
+  const toggleAll = () => setSel(sel.size === data.leads.length ? new Set() : new Set(data.leads.map(l => l.id)));
   return <div className="fade-in">
+    <PageHeader title="Leads" subtitle="Search, tag, and enroll. Duplicates are skipped on import by phone or email." actions={<Btn onClick={() => setShowImport(true)}>Import CSV</Btn>} />
     <div className="flex flex-wrap gap-2 mb-3 items-center">
-      <Input placeholder="Search name, phone, email, address…" value={q} onChange={e=>{setQ(e.target.value);setPage(0);}} className="max-w-xs" />
-      <Sel value={status} onChange={e=>{setStatus(e.target.value);setPage(0);}} className="max-w-[160px]"><option value="">All statuses</option>{STATUSES.map(s=><option key={s}>{s}</option>)}</Sel>
+      <Input aria-label="Search leads" placeholder="Search name, phone, email, address…" value={q} onChange={e => { setQ(e.target.value); setPage(0); }} className="max-w-xs" />
+      <Sel aria-label="Filter by status" value={status} onChange={e => { setStatus(e.target.value); setPage(0); }} className="max-w-[160px]"><option value="">All statuses</option>{STATUSES.map(s => <option key={s}>{s}</option>)}</Sel>
       <div className="flex-1"></div>
-      {sel.size>0 && <>
-        <Btn kind="ghost" small onClick={()=>setEnroll(true)}>➕ Add {sel.size} to campaign</Btn>
-        <Btn kind="danger" small onClick={async()=>{ if(!confirm(`Delete ${sel.size} leads?`))return; await api(`/markets/${market.id}/leads/bulk-delete`,{method:"POST",body:{ids:[...sel]}}); say("Deleted"); load(); }}>Delete</Btn>
+      {sel.size > 0 && <>
+        <Btn kind="ghost" small onClick={() => setEnroll(true)}>Add {sel.size} to campaign</Btn>
+        <Btn kind="danger" small onClick={async () => { if (!confirm(`Delete ${sel.size} leads?`)) return; await api(`/markets/${market.id}/leads/bulk-delete`, { method: "POST", body: { ids: [...sel] } }); say("Deleted"); load(); }}>Delete</Btn>
       </>}
-      <Btn onClick={()=>setShowImport(true)}>⬆ Import CSV</Btn>
     </div>
-    <div className="text-xs text-slate-500 mb-2">{data.total.toLocaleString()} leads {sel.size>0 && `· ${sel.size} selected`}</div>
-    <Card className="p-0 overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead><tr className="text-left text-xs text-slate-400 border-b border-slate-700">
-          <th className="p-2.5"><input type="checkbox" checked={sel.size===data.leads.length&&data.leads.length>0} onChange={toggleAll} /></th>
-          <th className="p-2.5">Name</th><th className="p-2.5">Phone</th><th className="p-2.5">Email</th><th className="p-2.5">Address</th><th className="p-2.5">Tags</th><th className="p-2.5">Status</th>
-        </tr></thead>
-        <tbody>{data.leads.map(l => <tr key={l.id} className="border-b border-slate-800 hover:bg-slate-800/50 cursor-pointer" onClick={()=>setDetail(l.id)}>
-          <td className="p-2.5" onClick={e=>e.stopPropagation()}><input type="checkbox" checked={sel.has(l.id)} onChange={()=>{ const n=new Set(sel); n.has(l.id)?n.delete(l.id):n.add(l.id); setSel(n); }} /></td>
-          <td className="p-2.5 font-semibold text-white">{l.first_name} {l.last_name}</td>
-          <td className="p-2.5 text-slate-300">{l.phone}</td>
-          <td className="p-2.5 text-slate-400 max-w-[180px] truncate">{l.email}</td>
-          <td className="p-2.5 text-slate-400 max-w-[220px] truncate">{[l.address,l.city].filter(Boolean).join(", ")}</td>
-          <td className="p-2.5 text-slate-500 text-xs max-w-[120px] truncate">{l.tags}</td>
-          <td className="p-2.5"><StatusChip s={l.status} /></td>
-        </tr>)}</tbody>
-      </table>
-      {data.leads.length===0 && <div className="p-8 text-center text-slate-500">No leads yet. Import a CSV to get started.</div>}
-    </Card>
+    <div className="text-xs text-slate-500 mb-2">{loading ? "Loading leads…" : `${data.total.toLocaleString()} leads`}{sel.size > 0 && ` · ${sel.size} selected`}</div>
+    <div className={`${cardCls} overflow-hidden`}>
+      {loading ? <div className="p-4 space-y-2">{Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-8 rounded-lg" />)}</div> : <>
+        <div className="overflow-x-auto">
+          <table className="w-full text-[13px] min-w-[760px]">
+            <thead className="bg-[#0d1628] text-left text-[11px] uppercase tracking-wide text-slate-500"><tr>
+              <th className="p-2.5 w-8"><input type="checkbox" aria-label="Select page" checked={sel.size === data.leads.length && data.leads.length > 0} onChange={toggleAll} /></th>
+              <th className="p-2.5">Name</th><th className="p-2.5">Phone</th><th className="p-2.5">Email</th><th className="p-2.5">Address</th><th className="p-2.5">Tags</th><th className="p-2.5">Status</th>
+            </tr></thead>
+            <tbody>{data.leads.map(l => <tr key={l.id} className="border-t border-white/[0.05] hover:bg-white/[0.03] cursor-pointer" onClick={() => setDetail(l.id)}>
+              <td className="p-2.5" onClick={e => e.stopPropagation()}><input type="checkbox" aria-label="Select lead" checked={sel.has(l.id)} onChange={() => { const n = new Set(sel); n.has(l.id) ? n.delete(l.id) : n.add(l.id); setSel(n); }} /></td>
+              <td className="p-2.5 font-medium text-white">{(l.first_name + " " + l.last_name).trim() || "—"}</td>
+              <td className="p-2.5 text-slate-300 num">{l.phone || "—"}</td>
+              <td className="p-2.5 text-slate-400 max-w-[180px] truncate">{l.email}</td>
+              <td className="p-2.5 text-slate-400 max-w-[220px] truncate">{[l.address, l.city].filter(Boolean).join(", ")}</td>
+              <td className="p-2.5 text-slate-500 text-xs max-w-[120px] truncate">{l.tags}</td>
+              <td className="p-2.5"><StatusChip s={l.status} /></td>
+            </tr>)}</tbody>
+          </table>
+        </div>
+        {data.leads.length === 0 && <Empty icon="leads" title="No leads in this view" body="Import a CSV or clear the search. Duplicates already in the market are skipped." action={<Btn onClick={() => setShowImport(true)}>Import CSV</Btn>} />}
+      </>}
+    </div>
     <div className="flex gap-2 mt-3 items-center text-sm text-slate-400">
-      <Btn kind="ghost" small disabled={page===0} onClick={()=>setPage(p=>p-1)}>← Prev</Btn>
-      Page {page+1} of {Math.max(1, Math.ceil(data.total/LIMIT))}
-      <Btn kind="ghost" small disabled={(page+1)*LIMIT>=data.total} onClick={()=>setPage(p=>p+1)}>Next →</Btn>
+      <Btn kind="ghost" small disabled={page === 0} onClick={() => setPage(p => p - 1)}>Prev</Btn>
+      <span className="num">Page {page + 1} of {Math.max(1, Math.ceil(data.total / LIMIT))}</span>
+      <Btn kind="ghost" small disabled={(page + 1) * LIMIT >= data.total} onClick={() => setPage(p => p + 1)}>Next</Btn>
     </div>
-    {showImport && <ImportModal market={market} onClose={()=>setShowImport(false)} onDone={r=>{ setShowImport(false); say(`Imported ${r.added} leads (${r.duplicates} duplicates skipped)`); load(); }} />}
-    {detail && <LeadDetail market={market} id={detail} onClose={()=>{setDetail(null);load();}} say={say} />}
-    {enroll && <EnrollModal market={market} leadIds={[...sel]} onClose={()=>setEnroll(false)} onDone={r=>{ setEnroll(false); say(`Enrolled ${r.enrolled} (${r.blocked} blocked/opted-out)`); }} />}
+    {showImport && <ImportModal market={market} onClose={() => setShowImport(false)} onDone={r => { setShowImport(false); say(`Imported ${r.added} leads (${r.duplicates} duplicates skipped)`); load(); }} />}
+    {detail && <LeadDetail market={market} id={detail} onClose={() => { setDetail(null); load(); }} say={say} />}
+    {enroll && <EnrollModal market={market} leadIds={[...sel]} onClose={() => setEnroll(false)} onDone={r => { setEnroll(false); say(`Enrolled ${r.enrolled} (${r.blocked} blocked or opted out)`); }} />}
   </div>;
 }
 function ImportModal({ market, onClose, onDone }) {
@@ -315,34 +670,33 @@ function ImportModal({ market, onClose, onDone }) {
     setBusy(true);
     const out = rows.slice(1).map(r => {
       const o = { custom: {} };
-      map.forEach((f, i) => { if (f) o[f] = r[i]; else if (rows[0][i]) o.custom[rows[0][i].toLowerCase().replace(/\W+/g,"_")] = r[i]; });
+      map.forEach((f, i) => { if (f) o[f] = r[i]; else if (rows[0][i]) o.custom[rows[0][i].toLowerCase().replace(/\W+/g, "_")] = r[i]; });
       if (tags) o.tags = [o.tags, tags].filter(Boolean).join(",");
       return o;
     });
-    // chunked upload
-    let totals = { added:0, duplicates:0, skipped:0 };
+    let totals = { added: 0, duplicates: 0, skipped: 0 };
     for (let i = 0; i < out.length; i += 2000) {
-      const r = await api(`/markets/${market.id}/leads/import`, { method:"POST", body:{ rows: out.slice(i, i+2000) } });
+      const r = await api(`/markets/${market.id}/leads/import`, { method: "POST", body: { rows: out.slice(i, i + 2000) } });
       totals.added += r.added; totals.duplicates += r.duplicates; totals.skipped += r.skipped;
     }
     onDone(totals);
   };
   return <Modal title="Import leads from CSV" onClose={onClose} wide>
     {!rows ? <div>
-      <p className="text-sm text-slate-400 mb-3">Upload a CSV. You'll map the columns next. Duplicates (same phone or email already in this market) are skipped automatically.</p>
+      <p className="text-sm text-slate-400 mb-3">Upload a CSV, then map columns. Unmapped columns stay as custom merge fields. Same phone or email already in this market is skipped.</p>
       <input type="file" accept=".csv,.txt" onChange={onFile} className="text-sm text-slate-300" />
     </div> : <div>
-      <p className="text-sm text-slate-400 mb-3">{(rows.length-1).toLocaleString()} rows found. Map each column (unmapped columns are kept as custom fields usable in templates):</p>
+      <p className="text-sm text-slate-400 mb-3">{(rows.length - 1).toLocaleString()} rows. Map each column:</p>
       <div className="grid grid-cols-2 md:grid-cols-3 gap-2 max-h-72 overflow-y-auto">
-        {rows[0].map((h,i) => <div key={i} className="bg-slate-800 rounded-lg p-2">
-          <div className="text-xs font-bold text-slate-300 truncate">{h}</div>
+        {rows[0].map((h, i) => <div key={i} className="bg-[#0b1222] rounded-lg p-2 border border-white/5">
+          <div className="text-xs font-semibold text-slate-300 truncate">{h}</div>
           <div className="text-[10px] text-slate-500 truncate mb-1">{rows[1]?.[i]}</div>
-          <Sel value={map[i]} onChange={e=>{ const m=[...map]; m[i]=e.target.value; setMap(m); }}>{FIELD_OPTS.map(([v,l])=><option key={v} value={v}>{l}</option>)}</Sel>
+          <Sel value={map[i]} onChange={e => { const m = [...map]; m[i] = e.target.value; setMap(m); }}>{FIELD_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</Sel>
         </div>)}
       </div>
-      <Label>Add tag to all imported leads (optional)</Label>
-      <Input placeholder="e.g. probate-list-oct" value={tags} onChange={e=>setTags(e.target.value)} />
-      <div className="mt-4 flex gap-2"><Btn onClick={doImport} disabled={busy}>{busy?"Importing…":"Import "+(rows.length-1).toLocaleString()+" leads"}</Btn><Btn kind="ghost" onClick={()=>setRows(null)}>Back</Btn></div>
+      <Label>Tag every imported lead</Label>
+      <Input placeholder="e.g. probate-oct" value={tags} onChange={e => setTags(e.target.value)} />
+      <div className="mt-4 flex gap-2"><Btn onClick={doImport} disabled={busy}>{busy ? "Importing…" : "Import " + (rows.length - 1).toLocaleString() + " leads"}</Btn><Btn kind="ghost" onClick={() => setRows(null)}>Back</Btn></div>
     </div>}
   </Modal>;
 }
@@ -351,31 +705,32 @@ function LeadDetail({ market, id, onClose, say }) {
   const load = () => api(`/markets/${market.id}/leads/${id}`).then(setL);
   useEffect(() => { load(); }, [id]);
   if (!l) return null;
-  const save = async (patch) => { await api(`/markets/${market.id}/leads/${id}`, { method:"PUT", body: patch }); say("Saved"); load(); };
+  const save = async patch => { await api(`/markets/${market.id}/leads/${id}`, { method: "PUT", body: patch }); say("Saved"); load(); };
   return <Modal title={`${l.first_name} ${l.last_name}`.trim() || l.phone || l.email} onClose={onClose} wide>
     <div className="grid md:grid-cols-2 gap-4">
       <div>
         <Label>Status</Label>
-        <div className="flex flex-wrap gap-1.5">{STATUSES.map(s => <button key={s} onClick={()=>save({status:s})}
-          className={`${STATUS_COLORS[s]} ${l.status===s?"ring-2 ring-white":"opacity-50 hover:opacity-100"} text-white text-[10px] font-bold px-2 py-1 rounded-full uppercase`}>{s}</button>)}</div>
-        <Label>Phone</Label><Input defaultValue={l.phone} onBlur={e=>e.target.value!==l.phone&&save({phone:e.target.value})} />
-        <Label>Email</Label><Input defaultValue={l.email} onBlur={e=>e.target.value!==l.email&&save({email:e.target.value})} />
-        <Label>Address</Label><Input defaultValue={l.address} onBlur={e=>e.target.value!==l.address&&save({address:e.target.value})} />
-        <Label>Tags</Label><Input defaultValue={l.tags} onBlur={e=>e.target.value!==l.tags&&save({tags:e.target.value})} />
-        <Label>Notes</Label><TA rows={4} defaultValue={l.notes} onBlur={e=>e.target.value!==l.notes&&save({notes:e.target.value})} />
-        {Object.keys(JSON.parse(l.custom_json||"{}")).length>0 && <>
+        <div className="flex flex-wrap gap-1.5">{STATUSES.map(s => <button type="button" key={s} onClick={() => save({ status: s })}
+          className={`${STATUS_COLORS[s]} ${l.status === s ? "ring-2 ring-white" : "opacity-50 hover:opacity-100"} text-white text-[10px] font-bold px-2 py-1 rounded-full uppercase`}>{s}</button>)}</div>
+        <Label>Phone</Label><Input defaultValue={l.phone} onBlur={e => e.target.value !== l.phone && save({ phone: e.target.value })} />
+        <Label>Email</Label><Input defaultValue={l.email} onBlur={e => e.target.value !== l.email && save({ email: e.target.value })} />
+        <Label>Address</Label><Input defaultValue={l.address} onBlur={e => e.target.value !== l.address && save({ address: e.target.value })} />
+        <Label>Tags</Label><Input defaultValue={l.tags} onBlur={e => e.target.value !== l.tags && save({ tags: e.target.value })} />
+        <Label>Notes</Label><TA rows={4} defaultValue={l.notes} onBlur={e => e.target.value !== l.notes && save({ notes: e.target.value })} />
+        {Object.keys(JSON.parse(l.custom_json || "{}")).length > 0 && <>
           <Label>Custom fields</Label>
-          <div className="text-xs text-slate-400 space-y-0.5">{Object.entries(JSON.parse(l.custom_json)).map(([k,v])=><div key={k}><span className="text-slate-500">{k}:</span> {v}</div>)}</div></>}
+          <div className="text-xs text-slate-400 space-y-0.5">{Object.entries(JSON.parse(l.custom_json)).map(([k, v]) => <div key={k}><span className="text-slate-500">{k}:</span> {v}</div>)}</div>
+        </>}
       </div>
       <div>
         <Label>Message history ({l.messages.length})</Label>
         <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
-          {l.messages.map(m => <div key={m.id} className={`p-2 rounded-lg text-xs ${m.direction==="in"?"bg-slate-700 mr-8":"bg-blue-900/50 ml-8"}`}>
-            <div className="text-slate-400 text-[10px] mb-0.5">{m.direction==="in"?"← Received":"→ Sent"} · {m.channel} · {m.status} · {fmtDate(m.created_at)}</div>
-            {m.subject && <div className="font-bold">{m.subject}</div>}
+          {l.messages.map(m => <div key={m.id} className={`p-2.5 rounded-xl text-xs ${m.direction === "in" ? "bg-white/[0.06] mr-6" : "bg-blue-950/70 ml-6"}`}>
+            <div className="text-slate-400 text-[10px] mb-0.5">{m.direction === "in" ? "Received" : "Sent"} · {m.channel} · {m.status} · {fmtDate(m.created_at)}</div>
+            {m.subject && <div className="font-semibold">{m.subject}</div>}
             <div className="whitespace-pre-wrap">{m.body}</div>
           </div>)}
-          {l.messages.length===0 && <div className="text-slate-500 text-sm">No messages yet.</div>}
+          {l.messages.length === 0 && <div className="text-slate-500 text-sm">No messages yet.</div>}
         </div>
       </div>
     </div>
@@ -383,181 +738,190 @@ function LeadDetail({ market, id, onClose, say }) {
 }
 function EnrollModal({ market, leadIds, onClose, onDone }) {
   const [camps, setCamps] = useState([]); const [cid, setCid] = useState("");
-  useEffect(() => { api(`/markets/${market.id}/campaigns`).then(c=>{ setCamps(c); if(c[0]) setCid(c[0].id); }); }, []);
-  return <Modal title={`Add ${leadIds.length} leads to campaign`} onClose={onClose}>
-    {camps.length===0 ? <p className="text-sm text-slate-400">No campaigns in this market yet — create one on the Campaigns tab first.</p> : <>
+  useEffect(() => { api(`/markets/${market.id}/campaigns`).then(c => { setCamps(c); if (c[0]) setCid(c[0].id); }); }, []);
+  return <Modal title={`Add ${leadIds.length} leads to a campaign`} onClose={onClose}>
+    {camps.length === 0 ? <p className="text-sm text-slate-400">No campaigns in this market yet. Create one on the Campaigns tab first.</p> : <>
       <Label>Campaign</Label>
-      <Sel value={cid} onChange={e=>setCid(e.target.value)}>{camps.map(c=><option key={c.id} value={c.id}>{c.name} ({c.channel}, {c.status})</option>)}</Sel>
-      <div className="mt-4"><Btn onClick={async()=>onDone(await api(`/markets/${market.id}/campaigns/${cid}/enroll`,{method:"POST",body:{lead_ids:leadIds}}))}>Enroll</Btn></div>
+      <Sel value={cid} onChange={e => setCid(e.target.value)}>{camps.map(c => <option key={c.id} value={c.id}>{c.name} ({c.channel}, {c.status})</option>)}</Sel>
+      <div className="mt-4"><Btn onClick={async () => onDone(await api(`/markets/${market.id}/campaigns/${cid}/enroll`, { method: "POST", body: { lead_ids: leadIds } }))}>Enroll</Btn></div>
     </>}
   </Modal>;
 }
 
 /* ---------------------------- campaigns --------------------------------- */
 function Campaigns({ market, say }) {
-  const [camps, setCamps] = useState([]);
-  const [edit, setEdit] = useState(null); // null | "new" | campaign
-  const load = () => api(`/markets/${market.id}/campaigns`).then(setCamps);
-  useEffect(() => { load(); const t = setInterval(load, 10000); return () => clearInterval(t); }, [market.id]);
-  const setStatus = async (c, status) => { await api(`/markets/${market.id}/campaigns/${c.id}`, { method:"PUT", body:{ status } }); say(status==="running"?"Campaign started 🚀":"Campaign "+status); load(); };
+  const [camps, setCamps] = useState(null);
+  const [edit, setEdit] = useState(null);
+  const load = useCallback(() => api(`/markets/${market.id}/campaigns`).then(setCamps).catch(e => { say(e.message); setCamps([]); }), [market.id]);
+  useEffect(() => { setCamps(null); load(); const t = setInterval(load, 10000); return () => clearInterval(t); }, [load]);
+  const setStatus = async (c, status) => { await api(`/markets/${market.id}/campaigns/${c.id}`, { method: "PUT", body: { status } }); say(status === "running" ? "Campaign started" : "Campaign " + status); load(); };
   return <div className="fade-in">
-    <div className="flex justify-between mb-3">
-      <p className="text-sm text-slate-400">Drip sequences with A/B variants, throttling, quiet hours, and automatic stop-on-reply.</p>
-      <Btn onClick={()=>setEdit("new")}>+ New campaign</Btn>
-    </div>
-    <div className="space-y-3">
+    <PageHeader title="Campaigns" subtitle="Drip sequences with A/B variants, throttle, quiet hours, and stop-on-reply." actions={<Btn onClick={() => setEdit("new")}>New campaign</Btn>} />
+    {camps === null && <div className="space-y-3">{Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-24" />)}</div>}
+    {camps && <div className="space-y-3">
       {camps.map(c => {
-        const active = c.counts.active||0, done = c.counts.completed||0, replied = c.counts.replied||0, total = Object.values(c.counts).reduce((a,b)=>a+b,0);
+        const active = c.counts.active || 0, total = Object.values(c.counts).reduce((a, b) => a + b, 0);
+        const repliedLeads = c.replies || 0;
+        const rate = c.sent ? Math.round(1000 * repliedLeads / c.sent) / 10 : null;
         return <Card key={c.id}>
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex-1 min-w-[200px]">
-              <div className="flex items-center gap-2">
-                <span className="font-bold text-white">{c.name}</span>
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${c.channel==="sms"?"bg-blue-600":"bg-purple-600"} text-white`}>{c.channel}</span>
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${ {running:"bg-emerald-600",paused:"bg-amber-600",draft:"bg-slate-600",completed:"bg-slate-700"}[c.status] } text-white`}>{c.status}</span>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-semibold text-white">{c.name}</span>
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase text-white ${c.channel === "sms" ? "bg-blue-600" : "bg-purple-600"}`}>{c.channel}</span>
+                <StatusPill status={c.status} />
               </div>
-              <div className="text-xs text-slate-400 mt-1">{c.steps.length} step{c.steps.length===1?"":"s"} · {c.throttle_per_min}/min · {c.daily_cap.toLocaleString()}/day cap</div>
+              <div className="text-xs text-slate-400 mt-1">{c.steps.length} step{c.steps.length === 1 ? "" : "s"} · {c.throttle_per_min}/min · {c.daily_cap.toLocaleString()}/day cap · reply rate {fmtRate(rate)}</div>
             </div>
             <div className="flex gap-4 text-center text-xs">
-              <div><div className="text-lg font-black text-white">{total.toLocaleString()}</div><div className="text-slate-500">enrolled</div></div>
-              <div><div className="text-lg font-black text-blue-400">{c.sent.toLocaleString()}</div><div className="text-slate-500">sent</div></div>
-              <div><div className="text-lg font-black text-amber-400">{replied.toLocaleString()}</div><div className="text-slate-500">replied</div></div>
-              <div><div className="text-lg font-black text-emerald-400">{active.toLocaleString()}</div><div className="text-slate-500">in queue</div></div>
+              <div><div className="text-lg font-semibold text-white num">{total.toLocaleString()}</div><div className="text-slate-500">enrolled</div></div>
+              <div><div className="text-lg font-semibold text-blue-300 num">{c.sent.toLocaleString()}</div><div className="text-slate-500">sent</div></div>
+              <div><div className="text-lg font-semibold text-amber-300 num">{repliedLeads.toLocaleString()}</div><div className="text-slate-500">replied</div></div>
+              <div><div className="text-lg font-semibold text-emerald-300 num">{active.toLocaleString()}</div><div className="text-slate-500">in queue</div></div>
             </div>
             <div className="flex gap-1.5">
-              {c.status!=="running" ? <Btn kind="success" small onClick={()=>setStatus(c,"running")}>▶ Start</Btn>
-                : <Btn kind="ghost" small onClick={()=>setStatus(c,"paused")}>⏸ Pause</Btn>}
-              <Btn kind="ghost" small onClick={()=>setEdit(c)}>Edit</Btn>
-              <Btn kind="danger" small onClick={async()=>{ if(!confirm("Delete campaign? Messages already sent stay in history."))return; await api(`/markets/${market.id}/campaigns/${c.id}`,{method:"DELETE"}); load(); }}>✕</Btn>
+              {c.status !== "running" ? <Btn kind="success" small onClick={() => setStatus(c, "running")}>Start</Btn>
+                : <Btn kind="ghost" small onClick={() => setStatus(c, "paused")}>Pause</Btn>}
+              <Btn kind="ghost" small onClick={() => setEdit(c)}>Edit</Btn>
+              <Btn kind="danger" small onClick={async () => { if (!confirm("Delete campaign? Messages already sent stay in history.")) return; await api(`/markets/${market.id}/campaigns/${c.id}`, { method: "DELETE" }); load(); }}>Delete</Btn>
             </div>
           </div>
-        </Card>; })}
-      {camps.length===0 && <Card className="text-center text-slate-500 py-10">No campaigns yet. Create one, then enroll leads from the Leads tab.</Card>}
-    </div>
-    {edit && <CampaignEditor market={market} campaign={edit==="new"?null:edit} onClose={()=>setEdit(null)} onDone={()=>{ setEdit(null); say("Campaign saved"); load(); }} />}
+        </Card>;
+      })}
+      {camps.length === 0 && <div className={cardCls}><Empty icon="campaigns" title="No campaigns yet" body="Write the first step, add follow-ups, then enroll leads from the Leads tab." action={<Btn onClick={() => setEdit("new")}>New campaign</Btn>} /></div>}
+    </div>}
+    {edit && <CampaignEditor market={market} campaign={edit === "new" ? null : edit} onClose={() => setEdit(null)} onDone={() => { setEdit(null); say("Campaign saved"); load(); }} />}
   </div>;
 }
 function CampaignEditor({ market, campaign, onClose, onDone }) {
-  const [f, setF] = useState(campaign ? { name:campaign.name, channel:campaign.channel, throttle_per_min:campaign.throttle_per_min, daily_cap:campaign.daily_cap, steps:campaign.steps }
-    : { name:"", channel:"sms", throttle_per_min:20, daily_cap:2000, steps:[{ delay_days:0, variants:[{subject:"",body:""}] }] });
+  const [f, setF] = useState(campaign ? { name: campaign.name, channel: campaign.channel, throttle_per_min: campaign.throttle_per_min, daily_cap: campaign.daily_cap, steps: campaign.steps }
+    : { name: "", channel: "sms", throttle_per_min: 20, daily_cap: 2000, steps: [{ delay_days: 0, variants: [{ subject: "", body: "" }] }] });
   const [tpls, setTpls] = useState([]);
   useEffect(() => { api(`/markets/${market.id}/templates`).then(setTpls); }, []);
-  const upStep = (i, patch) => { const s=[...f.steps]; s[i]={...s[i],...patch}; setF({...f,steps:s}); };
-  const upVar = (i, j, patch) => { const s=[...f.steps]; const v=[...s[i].variants]; v[j]={...v[j],...patch}; s[i]={...s[i],variants:v}; setF({...f,steps:s}); };
+  const upStep = (i, patch) => { const s = [...f.steps]; s[i] = { ...s[i], ...patch }; setF({ ...f, steps: s }); };
+  const upVar = (i, j, patch) => { const s = [...f.steps]; const v = [...s[i].variants]; v[j] = { ...v[j], ...patch }; s[i] = { ...s[i], variants: v }; setF({ ...f, steps: s }); };
   const save = async () => {
-    const body = { ...f, steps: f.steps };
-    if (campaign) await api(`/markets/${market.id}/campaigns/${campaign.id}`, { method:"PUT", body });
-    else await api(`/markets/${market.id}/campaigns`, { method:"POST", body });
+    if (campaign) await api(`/markets/${market.id}/campaigns/${campaign.id}`, { method: "PUT", body: f });
+    else await api(`/markets/${market.id}/campaigns`, { method: "POST", body: f });
     onDone();
   };
-  const mergeHelp = "Merge fields: {{first_name}} {{last_name}} {{address}} {{city}} + any custom CSV column. Spintax: {Hi|Hey|Hello}";
-  return <Modal title={campaign?"Edit campaign":"New campaign"} onClose={onClose} wide>
-    <div className="grid grid-cols-2 gap-3">
-      <div><Label>Name</Label><Input value={f.name} onChange={e=>setF({...f,name:e.target.value})} placeholder="e.g. Vacant Land Blast — Oct" /></div>
-      <div><Label>Channel</Label><Sel value={f.channel} onChange={e=>setF({...f,channel:e.target.value})} disabled={!!campaign}><option value="sms">SMS (Twilio)</option><option value="email">Cold Email (SendGrid/SMTP)</option></Sel></div>
-      <div><Label>Throttle (msgs/minute)</Label><Input type="number" value={f.throttle_per_min} onChange={e=>setF({...f,throttle_per_min:+e.target.value})} /></div>
-      <div><Label>Daily cap (this campaign)</Label><Input type="number" value={f.daily_cap} onChange={e=>setF({...f,daily_cap:+e.target.value})} /></div>
+  return <Modal title={campaign ? "Edit campaign" : "New campaign"} onClose={onClose} wide>
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <div><Label>Name</Label><Input value={f.name} onChange={e => setF({ ...f, name: e.target.value })} placeholder="Vacant land — October" /></div>
+      <div><Label>Channel</Label><Sel value={f.channel} onChange={e => setF({ ...f, channel: e.target.value })} disabled={!!campaign}><option value="sms">SMS (Twilio)</option><option value="email">Cold email</option></Sel></div>
+      <div><Label>Throttle (msgs/minute)</Label><Input type="number" value={f.throttle_per_min} onChange={e => setF({ ...f, throttle_per_min: +e.target.value })} /></div>
+      <div><Label>Daily cap (this campaign)</Label><Input type="number" value={f.daily_cap} onChange={e => setF({ ...f, daily_cap: +e.target.value })} /></div>
     </div>
-    <div className="text-[11px] text-slate-500 mt-2">{mergeHelp}</div>
-    <Label>Sequence steps</Label>
+    <div className="text-[11px] text-slate-500 mt-2">Merge fields: {"{{first_name}} {{last_name}} {{address}} {{city}}"} plus any custom CSV column. Spintax: {"{Hi|Hey|Hello}"}</div>
+    <Label>Sequence</Label>
     <div className="space-y-3">
-      {f.steps.map((s,i) => <div key={i} className="bg-slate-800 rounded-xl p-3 border border-slate-700">
-        <div className="flex items-center gap-2 mb-2">
-          <span className="font-bold text-white text-sm">Step {i+1}</span>
-          {i>0 && <><span className="text-xs text-slate-400">send</span>
-            <Input type="number" className="!w-16 text-center" value={s.delay_days} onChange={e=>upStep(i,{delay_days:+e.target.value})} />
-            <span className="text-xs text-slate-400">days after previous step (skipped automatically if they reply)</span></>}
+      {f.steps.map((s, i) => <div key={i} className="bg-[#0b1222] rounded-xl p-3 border border-white/10">
+        <div className="flex flex-wrap items-center gap-2 mb-2">
+          <span className="font-semibold text-white text-sm">Step {i + 1}</span>
+          {i > 0 && <><span className="text-xs text-slate-400">send</span>
+            <Input type="number" className="!w-16 text-center" value={s.delay_days} onChange={e => upStep(i, { delay_days: +e.target.value })} />
+            <span className="text-xs text-slate-400">days after the previous step, unless they reply</span></>}
           <div className="flex-1"></div>
-          {f.steps.length>1 && <Btn kind="danger" small onClick={()=>setF({...f,steps:f.steps.filter((_,x)=>x!==i)})}>remove</Btn>}
+          {f.steps.length > 1 && <Btn kind="danger" small onClick={() => setF({ ...f, steps: f.steps.filter((_, x) => x !== i) })}>Remove</Btn>}
         </div>
-        {s.variants.map((v,j) => <div key={j} className="mb-2 bg-slate-900/60 rounded-lg p-2">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-[10px] font-bold text-slate-400 uppercase">Variant {String.fromCharCode(65+j)} {s.variants.length>1 && "(A/B rotated)"}</span>
+        {s.variants.map((v, j) => <div key={j} className="mb-2 bg-black/20 rounded-lg p-2">
+          <div className="flex items-center justify-between mb-1 gap-2">
+            <span className="text-[10px] font-bold text-slate-400 uppercase">Variant {String.fromCharCode(65 + j)}{s.variants.length > 1 ? " · rotated" : ""}</span>
             <div className="flex gap-2 items-center">
-              {tpls.filter(t=>t.channel===f.channel).length>0 && <Sel className="!py-1 !text-xs !w-auto" value="" onChange={e=>{ const t=tpls.find(x=>x.id===+e.target.value); if(t) upVar(i,j,{body:t.body,subject:t.subject}); }}>
-                <option value="">insert template…</option>{tpls.filter(t=>t.channel===f.channel).map(t=><option key={t.id} value={t.id}>{t.name}</option>)}</Sel>}
-              {s.variants.length>1 && <button className="text-red-400 text-xs" onClick={()=>upStep(i,{variants:s.variants.filter((_,x)=>x!==j)})}>✕</button>}
+              {tpls.filter(t => t.channel === f.channel).length > 0 && <Sel className="!py-1 !text-xs !w-auto" value="" onChange={e => { const t = tpls.find(x => x.id === +e.target.value); if (t) upVar(i, j, { body: t.body, subject: t.subject }); }}>
+                <option value="">Insert template…</option>{tpls.filter(t => t.channel === f.channel).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</Sel>}
+              {s.variants.length > 1 && <button type="button" className="text-rose-300 text-xs" onClick={() => upStep(i, { variants: s.variants.filter((_, x) => x !== j) })}>Remove</button>}
             </div>
           </div>
-          {f.channel==="email" && <Input className="mb-1" placeholder="Subject line" value={v.subject||""} onChange={e=>upVar(i,j,{subject:e.target.value})} />}
-          <TA rows={3} placeholder={f.channel==="sms"?"{Hi|Hey} {{first_name}}, this is Maher. Are you still the owner of {{address}}? I'd like to make you a cash offer.":"Email body…"} value={v.body} onChange={e=>upVar(i,j,{body:e.target.value})} />
-          <div className="text-[10px] text-slate-500 text-right">{(v.body||"").length} chars{f.channel==="sms" && (v.body||"").length>160 ? ` · ${Math.ceil((v.body||"").length/153)} SMS segments` : ""}</div>
+          {f.channel === "email" && <Input className="mb-1" placeholder="Subject" value={v.subject || ""} onChange={e => upVar(i, j, { subject: e.target.value })} />}
+          <TA rows={3} placeholder={f.channel === "sms" ? "{Hi|Hey} {{first_name}}, are you still the owner of {{address}}?" : "Email body…"} value={v.body} onChange={e => upVar(i, j, { body: e.target.value })} />
+          <div className="text-[10px] text-slate-500 text-right">{(v.body || "").length} chars{f.channel === "sms" && (v.body || "").length > 160 ? ` · ${Math.ceil((v.body || "").length / 153)} SMS segments` : ""}</div>
         </div>)}
-        <Btn kind="ghost" small onClick={()=>upStep(i,{variants:[...s.variants,{subject:"",body:""}]})}>+ A/B variant</Btn>
+        <Btn kind="ghost" small onClick={() => upStep(i, { variants: [...s.variants, { subject: "", body: "" }] })}>Add A/B variant</Btn>
       </div>)}
     </div>
-    <div className="mt-3 flex gap-2">
-      <Btn kind="ghost" onClick={()=>setF({...f,steps:[...f.steps,{delay_days:2,variants:[{subject:"",body:""}]}]})}>+ Add follow-up step</Btn>
+    <div className="mt-3 flex flex-wrap gap-2">
+      <Btn kind="ghost" onClick={() => setF({ ...f, steps: [...f.steps, { delay_days: 2, variants: [{ subject: "", body: "" }] }] })}>Add follow-up</Btn>
       <div className="flex-1"></div>
-      <Btn onClick={save} disabled={!f.name || f.steps.some(s=>s.variants.some(v=>!v.body))}>Save campaign</Btn>
+      <Btn onClick={save} disabled={!f.name || f.steps.some(s => s.variants.some(v => !v.body))}>Save campaign</Btn>
     </div>
   </Modal>;
 }
 
 /* ------------------------------ inbox ----------------------------------- */
 function Inbox({ market, say }) {
-  const [convos, setConvos] = useState([]);
+  const [convos, setConvos] = useState(null);
   const [sel, setSel] = useState(null);
   const [thread, setThread] = useState([]);
   const [text, setText] = useState("");
   const [qr, setQr] = useState([]);
   const [filter, setFilter] = useState("all");
+  const [sending, setSending] = useState(false);
   const endRef = useRef();
-  const load = useCallback(() => api(`/markets/${market.id}/inbox`).then(setConvos), [market.id]);
-  useEffect(() => { load(); api(`/markets/${market.id}/quick-replies`).then(setQr); const t = setInterval(load, 15000); return () => clearInterval(t); }, [load]);
-  useEffect(() => { if (!sel) return; const f = () => api(`/markets/${market.id}/inbox/${sel.lead.id}`).then(t => { setThread(t); load(); });
-    f(); const t = setInterval(f, 10000); return () => clearInterval(t); }, [sel?.lead?.id]);
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior:"smooth" }); }, [thread.length]);
+  const load = useCallback(() => api(`/markets/${market.id}/inbox`).then(setConvos).catch(e => { say(e.message); setConvos([]); }), [market.id]);
+  useEffect(() => { setConvos(null); setSel(null); load(); api(`/markets/${market.id}/quick-replies`).then(setQr); const t = setInterval(load, 15000); return () => clearInterval(t); }, [load]);
+  useEffect(() => {
+    if (!sel) return;
+    const f = () => api(`/markets/${market.id}/inbox/${sel.lead.id}`).then(t => { setThread(t); load(); });
+    f(); const t = setInterval(f, 10000); return () => clearInterval(t);
+  }, [sel?.lead?.id]);
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [thread.length]);
   const send = async () => {
-    if (!text.trim()) return;
-    try { await api(`/markets/${market.id}/inbox/${sel.lead.id}/reply`, { method:"POST", body:{ body:text } }); setText("");
-      const t = await api(`/markets/${market.id}/inbox/${sel.lead.id}`); setThread(t); }
-    catch(e){ say("⚠️ " + e.message); }
+    if (!text.trim() || sending) return;
+    setSending(true);
+    try {
+      await api(`/markets/${market.id}/inbox/${sel.lead.id}/reply`, { method: "POST", body: { body: text } });
+      setText("");
+      setThread(await api(`/markets/${market.id}/inbox/${sel.lead.id}`));
+    } catch (e) { say(e.message); }
+    finally { setSending(false); }
   };
-  const shown = convos.filter(c => filter==="all" || (filter==="unread" && c.unread>0) || (filter==="hot" && c.lead?.status==="hot"));
-  return <div className="flex gap-3 fade-in" style={{height:"calc(100vh - 110px)"}}>
-    <Card className="w-80 shrink-0 p-0 flex flex-col">
-      <div className="p-2.5 border-b border-slate-700 flex gap-1">
-        {["all","unread","hot"].map(fk => <button key={fk} onClick={()=>setFilter(fk)}
-          className={`px-2.5 py-1 rounded-lg text-xs font-semibold capitalize ${filter===fk?"bg-blue-600 text-white":"text-slate-400 hover:bg-slate-700"}`}>{fk}</button>)}
+  const shown = (convos || []).filter(c => filter === "all" || (filter === "unread" && c.unread > 0) || (filter === "hot" && c.lead?.status === "hot"));
+  return <div className="flex gap-3 fade-in h-[calc(100vh-8.25rem)] min-h-[420px]">
+    <Card className={`w-full md:w-80 shrink-0 !p-0 flex-col overflow-hidden ${sel ? "hidden md:flex" : "flex"}`}>
+      <div className="p-2.5 border-b border-white/[0.06] flex gap-1">
+        {["all", "unread", "hot"].map(fk => <button type="button" key={fk} onClick={() => setFilter(fk)}
+          className={`px-2.5 py-1 rounded-lg text-xs font-semibold capitalize ${filter === fk ? "bg-blue-600 text-white" : "text-slate-400 hover:bg-white/5"}`}>{fk}</button>)}
       </div>
       <div className="flex-1 overflow-y-auto">
-        {shown.map(c => <button key={c.lead.id} onClick={()=>setSel(c)}
-          className={`w-full text-left p-3 border-b border-slate-800 hover:bg-slate-700/50 ${sel?.lead?.id===c.lead.id?"bg-slate-700/70":""}`}>
-          <div className="flex justify-between items-center">
-            <span className="font-semibold text-white text-sm truncate">{(c.lead.first_name+" "+c.lead.last_name).trim()||c.lead.phone}</span>
-            {c.unread>0 && <span className="bg-blue-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">{c.unread}</span>}
+        {convos === null && <div className="p-3 space-y-2">{Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-12 rounded-lg" />)}</div>}
+        {shown.map(c => <button type="button" key={c.lead.id} onClick={() => setSel(c)}
+          className={`w-full text-left p-3 border-b border-white/[0.05] hover:bg-white/[0.03] ${sel?.lead?.id === c.lead.id ? "bg-white/[0.05]" : ""}`}>
+          <div className="flex justify-between items-center gap-2">
+            <span className="font-medium text-white text-sm truncate">{(c.lead.first_name + " " + c.lead.last_name).trim() || c.lead.phone}</span>
+            {c.unread > 0 && <span className="bg-blue-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full num">{c.unread}</span>}
           </div>
-          <div className="flex items-center gap-1.5 mt-0.5">
+          <div className="flex items-center gap-1.5 mt-1 min-w-0">
             <StatusChip s={c.lead.status} />
-            <span className="text-xs text-slate-500 truncate">{c.last?.direction==="out"?"You: ":""}{c.last?.body}</span>
+            <span className="text-xs text-slate-500 truncate">{c.last?.direction === "out" ? "You: " : ""}{c.last?.body}</span>
           </div>
         </button>)}
-        {shown.length===0 && <div className="p-6 text-center text-slate-500 text-sm">No conversations{filter!=="all"?" matching filter":""}.</div>}
+        {convos && shown.length === 0 && <Empty icon="inbox" title="No conversations" body={filter === "all" ? "Replies land here once a lead texts this market's numbers." : "Nothing in this filter."} />}
       </div>
     </Card>
-    <Card className="flex-1 p-0 flex flex-col">
-      {!sel ? <div className="flex-1 flex items-center justify-center text-slate-500">Pick a conversation</div> : <>
-        <div className="p-3 border-b border-slate-700 flex items-center gap-2">
-          <div className="font-bold text-white">{(sel.lead.first_name+" "+sel.lead.last_name).trim()||sel.lead.phone}</div>
-          <span className="text-xs text-slate-500">{sel.lead.phone}</span>
+    <Card className={`flex-1 !p-0 flex-col overflow-hidden min-w-0 ${sel ? "flex" : "hidden md:flex"}`}>
+      {!sel ? <div className="flex-1 flex items-center justify-center"><Empty icon="inbox" title="Select a conversation" body="Unread replies are badged in the list." /></div> : <>
+        <div className="p-3 border-b border-white/[0.06] flex items-center gap-2 flex-wrap">
+          <button type="button" className="md:hidden text-xs text-blue-300" onClick={() => setSel(null)}>Back</button>
+          <div className="font-semibold text-white">{(sel.lead.first_name + " " + sel.lead.last_name).trim() || sel.lead.phone}</div>
+          <span className="text-xs text-slate-500 num">{sel.lead.phone}</span>
           <StatusChip s={sel.lead.status} />
           <div className="flex-1"></div>
-          <Sel className="!w-auto !py-1 !text-xs" value={sel.lead.status} onChange={async e=>{ await api(`/markets/${market.id}/leads/${sel.lead.id}`,{method:"PUT",body:{status:e.target.value}}); setSel({...sel,lead:{...sel.lead,status:e.target.value}}); load(); }}>
-            {STATUSES.map(s=><option key={s}>{s}</option>)}</Sel>
+          <Sel className="!w-auto !py-1 !text-xs" aria-label="Lead status" value={sel.lead.status} onChange={async e => { await api(`/markets/${market.id}/leads/${sel.lead.id}`, { method: "PUT", body: { status: e.target.value } }); setSel({ ...sel, lead: { ...sel.lead, status: e.target.value } }); load(); }}>
+            {STATUSES.map(s => <option key={s}>{s}</option>)}</Sel>
         </div>
         <div className="flex-1 overflow-y-auto p-4 space-y-2">
-          {thread.map(m => <div key={m.id} className={`max-w-[75%] p-2.5 rounded-2xl text-sm ${m.direction==="in"?"bg-slate-700 text-slate-100":"bg-blue-600 text-white ml-auto"}`}>
+          {thread.map(m => <div key={m.id} className={`max-w-[85%] md:max-w-[75%] p-2.5 rounded-2xl text-sm ${m.direction === "in" ? "bg-white/[0.06] text-slate-100" : "bg-blue-600 text-white ml-auto"}`}>
             <div className="whitespace-pre-wrap">{m.body}</div>
-            <div className={`text-[10px] mt-1 ${m.direction==="in"?"text-slate-400":"text-blue-200"}`}>{fmtDate(m.created_at)}{m.direction==="out" && ` · ${m.status}`}{m.error && ` · ${m.error}`}</div>
+            <div className={`text-[10px] mt-1 ${m.direction === "in" ? "text-slate-400" : "text-blue-100"}`}>{fmtDate(m.created_at)}{m.direction === "out" && ` · ${m.status}`}{m.error && ` · ${m.error}`}</div>
           </div>)}
           <div ref={endRef}></div>
         </div>
-        <div className="p-3 border-t border-slate-700">
-          {qr.length>0 && <div className="flex gap-1.5 flex-wrap mb-2">{qr.map(q=><button key={q.id} onClick={()=>setText(q.body)} className="bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs px-2.5 py-1 rounded-full">{q.name}</button>)}</div>}
-          <div className="flex gap-2">
-            <TA rows={2} value={text} onChange={e=>setText(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send();} }} placeholder="Type a reply… ({{first_name}} merge fields work here too)" />
-            <Btn onClick={send}>Send</Btn>
+        <div className="p-3 border-t border-white/[0.06]">
+          {qr.length > 0 && <div className="flex gap-1.5 flex-wrap mb-2">{qr.map(q => <button type="button" key={q.id} onClick={() => setText(q.body)} className="bg-white/[0.05] hover:bg-white/10 border border-white/10 text-slate-200 text-xs px-2.5 py-1 rounded-full">{q.name}</button>)}</div>}
+          <div className="flex gap-2 items-end">
+            <TA rows={2} value={text} onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} placeholder="Write a reply. {{first_name}} works here too." />
+            <Btn onClick={send} disabled={sending}>{sending ? "…" : "Send"}</Btn>
           </div>
         </div>
       </>}
@@ -567,186 +931,236 @@ function Inbox({ market, say }) {
 
 /* --------------------------- templates ---------------------------------- */
 function Templates({ market, say }) {
-  const [tpls, setTpls] = useState([]); const [qr, setQr] = useState([]);
+  const [tpls, setTpls] = useState(null); const [qr, setQr] = useState([]);
   const [edit, setEdit] = useState(null);
-  const load = () => { api(`/markets/${market.id}/templates`).then(setTpls); api(`/markets/${market.id}/quick-replies`).then(setQr); };
-  useEffect(load, [market.id]);
-  return <div className="grid md:grid-cols-2 gap-4 fade-in">
-    <div>
-      <div className="flex justify-between items-center mb-2"><h2 className="font-bold text-white">Message templates</h2><Btn small onClick={()=>setEdit({channel:"sms",name:"",subject:"",body:""})}>+ New</Btn></div>
-      <div className="space-y-2">{tpls.map(t => <Card key={t.id}>
-        <div className="flex justify-between items-start">
-          <div><span className="font-semibold text-white text-sm">{t.name}</span> <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full uppercase ml-1 ${t.channel==="sms"?"bg-blue-600":"bg-purple-600"} text-white`}>{t.channel}</span>
-            {t.subject && <div className="text-xs text-slate-300 font-semibold mt-1">Subj: {t.subject}</div>}
-            <div className="text-xs text-slate-400 mt-1 whitespace-pre-wrap">{t.body}</div></div>
-          <div className="flex gap-1 shrink-0 ml-2">
-            <Btn kind="ghost" small onClick={()=>setEdit(t)}>Edit</Btn>
-            <Btn kind="danger" small onClick={async()=>{ await api(`/markets/${market.id}/templates/${t.id}`,{method:"DELETE"}); load(); }}>✕</Btn>
-          </div></div>
-      </Card>)}{tpls.length===0 && <Card className="text-slate-500 text-sm">No templates. Templates can be inserted into campaign steps.</Card>}</div>
+  const load = useCallback(() => { api(`/markets/${market.id}/templates`).then(setTpls); api(`/markets/${market.id}/quick-replies`).then(setQr); }, [market.id]);
+  useEffect(() => { setTpls(null); load(); }, [load]);
+  return <div className="fade-in">
+    <PageHeader title="Templates" subtitle="Reusable copy for campaigns, plus short replies in the inbox." />
+    <div className="grid md:grid-cols-2 gap-4">
+      <div>
+        <div className="flex justify-between items-center mb-2"><h2 className="font-semibold text-white text-sm">Message templates</h2><Btn small onClick={() => setEdit({ channel: "sms", name: "", subject: "", body: "" })}>New</Btn></div>
+        {tpls === null && <Skeleton className="h-28" />}
+        <div className="space-y-2">{(tpls || []).map(t => <Card key={t.id}>
+          <div className="flex justify-between items-start gap-2">
+            <div className="min-w-0"><span className="font-medium text-white text-sm">{t.name}</span> <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full uppercase ml-1 text-white ${t.channel === "sms" ? "bg-blue-600" : "bg-purple-600"}`}>{t.channel}</span>
+              {t.subject && <div className="text-xs text-slate-300 font-medium mt-1">Subject: {t.subject}</div>}
+              <div className="text-xs text-slate-400 mt-1 whitespace-pre-wrap">{t.body}</div></div>
+            <div className="flex gap-1 shrink-0">
+              <Btn kind="ghost" small onClick={() => setEdit(t)}>Edit</Btn>
+              <Btn kind="danger" small onClick={async () => { await api(`/markets/${market.id}/templates/${t.id}`, { method: "DELETE" }); load(); }}>Delete</Btn>
+            </div>
+          </div>
+        </Card>)}{tpls && tpls.length === 0 && <div className={cardCls}><Empty icon="templates" title="No templates" body="Save copy here, then insert it into a campaign step." action={<Btn small onClick={() => setEdit({ channel: "sms", name: "", subject: "", body: "" })}>New template</Btn>} /></div>}</div>
+      </div>
+      <div>
+        <h2 className="font-semibold text-white text-sm mb-2">Inbox quick replies</h2>
+        <Card>
+          <div className="space-y-2 mb-3">{qr.map(q => <div key={q.id} className="flex justify-between items-start bg-[#0b1222] rounded-lg p-2.5 border border-white/5">
+            <div className="min-w-0"><div className="text-sm font-medium text-white">{q.name}</div><div className="text-xs text-slate-400 whitespace-pre-wrap">{q.body}</div></div>
+            <button type="button" className="text-rose-300 text-xs ml-2 shrink-0" onClick={async () => { await api(`/markets/${market.id}/quick-replies/${q.id}`, { method: "DELETE" }); load(); }}>Delete</button>
+          </div>)}
+          {qr.length === 0 && <p className="text-sm text-slate-500 mb-3">No quick replies yet. They show up as chips under the inbox composer.</p>}
+          </div>
+          <QuickReplyForm market={market} onDone={() => { load(); say("Quick reply added"); }} />
+        </Card>
+      </div>
     </div>
-    <div>
-      <div className="flex justify-between items-center mb-2"><h2 className="font-bold text-white">Inbox quick replies</h2></div>
-      <Card>
-        <div className="space-y-2 mb-3">{qr.map(q => <div key={q.id} className="flex justify-between items-start bg-slate-800 rounded-lg p-2">
-          <div><div className="text-sm font-semibold text-white">{q.name}</div><div className="text-xs text-slate-400">{q.body}</div></div>
-          <button className="text-red-400 text-xs ml-2" onClick={async()=>{ await api(`/markets/${market.id}/quick-replies/${q.id}`,{method:"DELETE"}); load(); }}>✕</button>
-        </div>)}</div>
-        <QuickReplyForm market={market} onDone={()=>{load(); say("Quick reply added");}} />
-      </Card>
-    </div>
-    {edit && <Modal title={edit.id?"Edit template":"New template"} onClose={()=>setEdit(null)}>
-      <Label>Name</Label><Input value={edit.name} onChange={e=>setEdit({...edit,name:e.target.value})} />
-      <Label>Channel</Label><Sel value={edit.channel} onChange={e=>setEdit({...edit,channel:e.target.value})}><option value="sms">SMS</option><option value="email">Email</option></Sel>
-      {edit.channel==="email" && <><Label>Subject</Label><Input value={edit.subject} onChange={e=>setEdit({...edit,subject:e.target.value})} /></>}
-      <Label>Body</Label><TA rows={5} value={edit.body} onChange={e=>setEdit({...edit,body:e.target.value})} />
-      <div className="text-[11px] text-slate-500 mt-1">Merge: {"{{first_name}} {{address}}"} etc. Spintax: {"{Hi|Hey|Hello}"}</div>
-      <div className="mt-4"><Btn onClick={async()=>{ if(edit.id) await api(`/markets/${market.id}/templates/${edit.id}`,{method:"PUT",body:edit}); else await api(`/markets/${market.id}/templates`,{method:"POST",body:edit}); setEdit(null); load(); say("Template saved"); }}>Save</Btn></div>
+    {edit && <Modal title={edit.id ? "Edit template" : "New template"} onClose={() => setEdit(null)}>
+      <Label>Name</Label><Input value={edit.name} onChange={e => setEdit({ ...edit, name: e.target.value })} />
+      <Label>Channel</Label><Sel value={edit.channel} onChange={e => setEdit({ ...edit, channel: e.target.value })}><option value="sms">SMS</option><option value="email">Email</option></Sel>
+      {edit.channel === "email" && <><Label>Subject</Label><Input value={edit.subject} onChange={e => setEdit({ ...edit, subject: e.target.value })} /></>}
+      <Label>Body</Label><TA rows={5} value={edit.body} onChange={e => setEdit({ ...edit, body: e.target.value })} />
+      <div className="text-[11px] text-slate-500 mt-1">Merge {"{{first_name}} {{address}}"}. Spintax {"{Hi|Hey|Hello}"}.</div>
+      <div className="mt-4"><Btn onClick={async () => { if (edit.id) await api(`/markets/${market.id}/templates/${edit.id}`, { method: "PUT", body: edit }); else await api(`/markets/${market.id}/templates`, { method: "POST", body: edit }); setEdit(null); load(); say("Template saved"); }}>Save</Btn></div>
     </Modal>}
   </div>;
 }
 function QuickReplyForm({ market, onDone }) {
-  const [f, setF] = useState({ name:"", body:"" });
+  const [f, setF] = useState({ name: "", body: "" });
   return <div className="flex gap-2 items-end">
-    <div className="flex-1"><Input placeholder="Label (e.g. 'Ask price')" value={f.name} onChange={e=>setF({...f,name:e.target.value})} className="mb-1.5" />
-      <Input placeholder="Reply text" value={f.body} onChange={e=>setF({...f,body:e.target.value})} /></div>
-    <Btn small onClick={async()=>{ if(!f.name||!f.body)return; await api(`/markets/${market.id}/quick-replies`,{method:"POST",body:f}); setF({name:"",body:""}); onDone(); }}>Add</Btn>
+    <div className="flex-1"><Input placeholder="Label, e.g. Ask price" value={f.name} onChange={e => setF({ ...f, name: e.target.value })} className="mb-1.5" />
+      <Input placeholder="Reply text" value={f.body} onChange={e => setF({ ...f, body: e.target.value })} /></div>
+    <Btn small onClick={async () => { if (!f.name || !f.body) return; await api(`/markets/${market.id}/quick-replies`, { method: "POST", body: f }); setF({ name: "", body: "" }); onDone(); }}>Add</Btn>
   </div>;
 }
 
 /* ---------------------------- opt-outs ---------------------------------- */
 function OptOuts({ market, say }) {
-  const [rows, setRows] = useState([]);
-  const [f, setF] = useState({ channel:"sms", value:"" });
-  const load = () => api(`/markets/${market.id}/optouts`).then(setRows);
-  useEffect(load, [market.id]);
-  return <div className="fade-in max-w-3xl">
+  const [rows, setRows] = useState(null);
+  const [f, setF] = useState({ channel: "sms", value: "" });
+  const load = useCallback(() => api(`/markets/${market.id}/optouts`).then(setRows), [market.id]);
+  useEffect(() => { setRows(null); load(); }, [load]);
+  return <div className="fade-in max-w-4xl">
+    <PageHeader title="Opt-outs" subtitle="STOP replies and unsubscribe clicks land here automatically. These contacts are blocked from campaigns and manual sends." />
     <Card className="mb-3">
-      <div className="flex gap-2 items-end">
-        <div><Label>Channel</Label><Sel value={f.channel} onChange={e=>setF({...f,channel:e.target.value})}><option value="sms">SMS (phone)</option><option value="email">Email</option></Sel></div>
-        <div className="flex-1"><Label>Phone / email</Label><Input value={f.value} onChange={e=>setF({...f,value:e.target.value})} /></div>
-        <Btn onClick={async()=>{ await api(`/markets/${market.id}/optouts`,{method:"POST",body:f}); setF({...f,value:""}); say("Added to DNC"); load(); }}>Add to DNC</Btn>
+      <div className="flex flex-wrap gap-2 items-end">
+        <div className="w-full sm:w-40"><Label>Channel</Label><Sel value={f.channel} onChange={e => setF({ ...f, channel: e.target.value })}><option value="sms">SMS</option><option value="email">Email</option></Sel></div>
+        <div className="flex-1 min-w-[180px]"><Label>Phone or email</Label><Input value={f.value} onChange={e => setF({ ...f, value: e.target.value })} /></div>
+        <Btn onClick={async () => { await api(`/markets/${market.id}/optouts`, { method: "POST", body: f }); setF({ ...f, value: "" }); say("Added to the opt-out list"); load(); }}>Add</Btn>
       </div>
-      <p className="text-xs text-slate-500 mt-2">STOP replies and unsubscribe clicks are added automatically. Opted-out contacts are blocked from all campaigns and manual sends.</p>
     </Card>
-    <Card className="p-0">
-      <table className="w-full text-sm">
-        <thead><tr className="text-left text-xs text-slate-400 border-b border-slate-700"><th className="p-2.5">Channel</th><th className="p-2.5">Value</th><th className="p-2.5">Reason</th><th className="p-2.5">When</th><th></th></tr></thead>
-        <tbody>{rows.map(r => <tr key={r.id} className="border-b border-slate-800">
-          <td className="p-2.5 uppercase text-xs font-bold text-slate-400">{r.channel}</td><td className="p-2.5 text-white">{r.value}</td>
-          <td className="p-2.5 text-slate-400 text-xs">{r.reason}</td><td className="p-2.5 text-slate-500 text-xs">{fmtDate(r.created_at)}</td>
-          <td className="p-2.5 text-right"><button className="text-red-400 text-xs" onClick={async()=>{ if(!confirm("Remove from DNC? Only do this if they explicitly re-opted in."))return; await api(`/markets/${market.id}/optouts/${r.id}`,{method:"DELETE"}); load(); }}>remove</button></td>
-        </tr>)}</tbody>
-      </table>
-      {rows.length===0 && <div className="p-8 text-center text-slate-500">No opt-outs yet.</div>}
-    </Card>
+    <div className={`${cardCls} overflow-hidden`}>
+      {rows === null ? <div className="p-4"><Skeleton className="h-20" /></div> : <>
+        <div className="overflow-x-auto">
+          <table className="w-full text-[13px] min-w-[560px]">
+            <thead className="text-left text-[11px] uppercase tracking-wide text-slate-500"><tr><th className="p-2.5">Channel</th><th className="p-2.5">Value</th><th className="p-2.5">Reason</th><th className="p-2.5">When</th><th></th></tr></thead>
+            <tbody>{rows.map(r => <tr key={r.id} className="border-t border-white/[0.06]">
+              <td className="p-2.5 uppercase text-[10px] font-bold text-slate-400">{r.channel}</td>
+              <td className="p-2.5 text-white num">{r.value}</td>
+              <td className="p-2.5 text-slate-400 text-xs">{r.reason}</td>
+              <td className="p-2.5 text-slate-500 text-xs">{fmtDate(r.created_at)}</td>
+              <td className="p-2.5 text-right"><button type="button" className="text-rose-300 text-xs" onClick={async () => { if (!confirm("Remove from the opt-out list? Only do this if they explicitly opted back in.")) return; await api(`/markets/${market.id}/optouts/${r.id}`, { method: "DELETE" }); load(); }}>Remove</button></td>
+            </tr>)}</tbody>
+          </table>
+        </div>
+        {rows.length === 0 && <Empty icon="optouts" title="No opt-outs yet" body="STOP texts and unsubscribe clicks will show up here. You can also add a number or email by hand." />}
+      </>}
+    </div>
   </div>;
 }
 
 /* ------------------------- market settings ------------------------------ */
-function MarketSettings({ market, refresh, say, isAdmin }) {
+function MarketSettings({ market, refresh, say, isAdmin, go }) {
   const [s, setS] = useState({ ...market.settings });
   const [name, setName] = useState(market.name);
   const [color, setColor] = useState(market.color);
-  const [numbers, setNumbers] = useState((market.settings.from_numbers||[]).join("\n"));
-  useEffect(() => { setS({...market.settings}); setName(market.name); setColor(market.color); setNumbers((market.settings.from_numbers||[]).join("\n")); }, [market.id]);
+  const [numbers, setNumbers] = useState((market.settings.from_numbers || []).join("\n"));
+  const [compliance, setCompliance] = useState(null);
+  const loadCompliance = () => api(`/markets/${market.id}/compliance`).then(setCompliance).catch(() => {});
+  useEffect(() => {
+    setS({ ...market.settings }); setName(market.name); setColor(market.color);
+    setNumbers((market.settings.from_numbers || []).join("\n"));
+    loadCompliance();
+  }, [market.id]);
   const save = async () => {
-    const from_numbers = numbers.split("\n").map(x=>x.trim()).filter(Boolean);
-    await api(`/markets/${market.id}`, { method:"PUT", body:{ ...(isAdmin?{name,color}:{}), settings:{ ...s, from_numbers } } });
-    say("Market saved"); refresh();
+    const from_numbers = numbers.split("\n").map(x => x.trim()).filter(Boolean);
+    await api(`/markets/${market.id}`, { method: "PUT", body: { ...(isAdmin ? { name, color } : {}), settings: { ...s, from_numbers } } });
+    say("Market saved");
+    await refresh();
+    loadCompliance();
   };
-  return <div className="max-w-2xl fade-in">
+  return <div className="max-w-3xl fade-in space-y-4">
+    <PageHeader title="Market setup" subtitle="Numbers, caps, quiet hours, and the from-address for this workspace." actions={isAdmin ? <Btn kind="ghost" onClick={() => go("gsettings")}>A2P status</Btn> : null} />
     <Card>
-      {isAdmin && <div className="grid grid-cols-2 gap-3">
-        <div><Label>Market name</Label><Input value={name} onChange={e=>setName(e.target.value)} /></div>
-        <div><Label>Color</Label><input type="color" value={color} onChange={e=>setColor(e.target.value)} className="h-10 w-20 bg-transparent" /></div>
+      <div className="flex items-center justify-between gap-3 mb-1">
+        <h2 className="font-semibold text-white">Compliance checklist</h2>
+        {compliance && <span className={`text-xs font-semibold ${compliance.passing === compliance.total ? "text-emerald-300" : "text-amber-200"}`}>{compliance.passing}/{compliance.total} passing</span>}
+      </div>
+      <p className="text-xs text-slate-500 mb-2">These are the guardrails already enforced by Lariat. The checklist refreshes after you save. Brand and campaign approval stays in the Twilio Console.</p>
+      {!compliance && <Skeleton className="h-24" />}
+      {compliance && compliance.checks.map(c => <CheckItem key={c.id} check={c} />)}
+    </Card>
+    <Card>
+      {isAdmin && <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div><Label>Market name</Label><Input value={name} onChange={e => setName(e.target.value)} /></div>
+        <div><Label>Color</Label><input type="color" value={color} onChange={e => setColor(e.target.value)} className="h-10 w-20 bg-transparent" /></div>
       </div>}
-      <Label>Twilio phone numbers for this market (one per line, +1XXXXXXXXXX)</Label>
-      <TA rows={4} value={numbers} onChange={e=>setNumbers(e.target.value)} placeholder="+17025551234&#10;+17025555678" />
-      <p className="text-xs text-slate-500 mt-1">Outbound sends rotate round-robin across this pool. Inbound texts to these numbers land in this market's inbox. Rule of thumb for deliverability: ~150–200 sends/day per number.</p>
-      <div className="grid grid-cols-2 gap-3">
-        <div><Label>Daily SMS cap (market)</Label><Input type="number" value={s.daily_sms_cap} onChange={e=>setS({...s,daily_sms_cap:+e.target.value})} /></div>
-        <div><Label>Daily email cap (market)</Label><Input type="number" value={s.daily_email_cap||2000} onChange={e=>setS({...s,daily_email_cap:+e.target.value})} /></div>
-        <div><Label>Quiet hours start sending (hour)</Label><Input type="number" min="0" max="23" value={s.quiet_start} onChange={e=>setS({...s,quiet_start:+e.target.value})} /></div>
-        <div><Label>Stop sending (hour)</Label><Input type="number" min="0" max="23" value={s.quiet_end} onChange={e=>setS({...s,quiet_end:+e.target.value})} /></div>
-        <div><Label>Timezone offset vs UTC (Vegas = -8)</Label><Input type="number" value={s.tz_offset} onChange={e=>setS({...s,tz_offset:+e.target.value})} /></div>
+      <Label>Twilio numbers for this market</Label>
+      <TA rows={4} value={numbers} onChange={e => setNumbers(e.target.value)} placeholder={"+17025551234\n+17025555678"} />
+      <p className="text-xs text-slate-500 mt-1">One E.164 number per line. Outbound SMS round-robins the pool. Inbound texts to these numbers land in this inbox. A useful ceiling is about 150–200 sends per number per day.</p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div><Label>Daily SMS cap</Label><Input type="number" value={s.daily_sms_cap} onChange={e => setS({ ...s, daily_sms_cap: +e.target.value })} /></div>
+        <div><Label>Daily email cap</Label><Input type="number" value={s.daily_email_cap || 2000} onChange={e => setS({ ...s, daily_email_cap: +e.target.value })} /></div>
+        <div><Label>Send from hour</Label><Input type="number" min="0" max="23" value={s.quiet_start} onChange={e => setS({ ...s, quiet_start: +e.target.value })} /></div>
+        <div><Label>Stop at hour</Label><Input type="number" min="0" max="23" value={s.quiet_end} onChange={e => setS({ ...s, quiet_end: +e.target.value })} /></div>
+        <div><Label>Timezone offset vs UTC</Label><Input type="number" value={s.tz_offset} onChange={e => setS({ ...s, tz_offset: +e.target.value })} /></div>
       </div>
-      <Label>Cold email "From" for this market</Label>
-      <div className="grid grid-cols-2 gap-3">
-        <Input placeholder="From name (e.g. Maher at Lariat Land)" value={s.email_from_name||""} onChange={e=>setS({...s,email_from_name:e.target.value})} />
-        <Input placeholder="from@yourdomain.com (verified in SendGrid)" value={s.email_from||""} onChange={e=>setS({...s,email_from:e.target.value})} />
+      <Label>Cold email from-address</Label>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Input placeholder="From name" value={s.email_from_name || ""} onChange={e => setS({ ...s, email_from_name: e.target.value })} />
+        <Input placeholder="from@yourdomain.com" value={s.email_from || ""} onChange={e => setS({ ...s, email_from: e.target.value })} />
       </div>
-      <div className="mt-4"><Btn onClick={save}>Save market settings</Btn></div>
+      <div className="mt-4"><Btn onClick={save}>Save market</Btn></div>
     </Card>
   </div>;
 }
 
 /* -------------------------- admin: overview ----------------------------- */
 function Overview() {
-  const [rows, setRows] = useState([]);
-  useEffect(() => { api("/overview").then(setRows); }, []);
-  const tot = k => rows.reduce((a,r)=>a+(r.stats[k]||0),0);
+  const [range, setRange] = useRange();
+  const { data, err, loading } = useReport(`/reports/overview?range=${range}`);
+  const maxSent = Math.max(1, ...((data && data.markets) || []).map(m => m.kpis.sent));
   return <div className="fade-in">
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-      <Stat label="Total leads" value={tot("leads")} />
-      <Stat label="SMS this month" value={tot("sms_month")} sub={`target pacing: ${Math.round(tot("sms_month")/200000*100)}% of 200k`} color="text-blue-400" />
-      <Stat label="Emails this month" value={tot("email_month")} color="text-purple-400" />
-      <Stat label="Replies this month" value={tot("replies_month")} color="text-amber-400" />
-    </div>
-    <Card className="p-0 overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead><tr className="text-left text-xs text-slate-400 border-b border-slate-700">
-          <th className="p-3">Market</th><th className="p-3">Leads</th><th className="p-3">Sent today</th><th className="p-3">SMS / mo</th><th className="p-3">Email / mo</th><th className="p-3">Replies / mo</th><th className="p-3">Unread</th><th className="p-3">Hot</th><th className="p-3">Opt-outs</th><th className="p-3">Running</th>
-        </tr></thead>
-        <tbody>{rows.map(r => <tr key={r.market.id} className="border-b border-slate-800">
-          <td className="p-3 font-semibold text-white"><span className="inline-block w-2.5 h-2.5 rounded-full mr-2" style={{background:r.market.color}}></span>{r.market.name}</td>
-          {["leads","sent_today","sms_month","email_month","replies_month","unread","hot","opt_outs","active_campaigns"].map(k=><td key={k} className="p-3 text-slate-300">{(r.stats[k]||0).toLocaleString()}</td>)}
-        </tr>)}</tbody>
-      </table>
-    </Card>
+    <PageHeader title="All markets" subtitle="Compare send, reply, and opt-out volume across every market you can see." actions={<RangeToggle value={range} onChange={setRange} />} />
+    {loading && <div className="space-y-3"><KpiRowSkeleton /><Skeleton className="h-48" /></div>}
+    {err && <Card className="text-rose-300 text-sm">{err}</Card>}
+    {data && <>
+      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3 mb-3">
+        <Kpi label="Sent" value={fmtNum(data.totals.sent)} sub={`${fmtNum(data.totals.sms_sent)} SMS · ${fmtNum(data.totals.email_sent)} email`} tone="accent" />
+        <Kpi label="Delivered" value={fmtRate(data.totals.delivery_rate)} sub={`${fmtNum(data.totals.delivered)} receipts`} tone="good" />
+        <Kpi label="Replies" value={fmtNum(data.totals.unique_replies)} sub={fmtRate(data.totals.reply_rate) + " reply rate"} tone="warn" />
+        <Kpi label="Opt-outs" value={fmtNum(data.totals.opt_outs)} sub={fmtRate(data.totals.opt_out_rate) + " of sends"} />
+        <Kpi label="Failed" value={fmtNum(data.totals.failed)} />
+        <Kpi label="Leads" value={fmtNum(data.totals.leads)} sub={`${fmtNum(data.totals.leads_added)} added in range`} />
+      </div>
+      <div className={`${cardCls} overflow-hidden`}>
+        <div className="overflow-x-auto">
+          <table className="w-full text-[13px] min-w-[860px]">
+            <thead className="text-left text-[11px] uppercase tracking-wide text-slate-500"><tr>
+              <th className="p-3">Market</th><th className="p-3">Share</th><th className="p-3 text-right">Sent</th><th className="p-3 text-right">Delivered</th><th className="p-3 text-right">Replies</th><th className="p-3 text-right">Reply rate</th><th className="p-3 text-right">Opt-outs</th><th className="p-3 text-right">Leads</th><th className="p-3 text-right">Unread</th><th className="p-3 text-right">Running</th>
+            </tr></thead>
+            <tbody>{data.markets.map(r => <tr key={r.market.id} className="border-t border-white/[0.06]">
+              <td className="p-3 font-medium text-white"><span className="inline-block w-2.5 h-2.5 rounded-full mr-2" style={{ background: r.market.color }}></span>{r.market.name}</td>
+              <td className="p-3"><div className="h-1.5 rounded-full bg-white/10 w-24 overflow-hidden"><div className="h-full rounded-full" style={{ width: `${(r.kpis.sent / maxSent) * 100}%`, background: r.market.color }} /></div></td>
+              <td className="p-3 text-right num">{fmtNum(r.kpis.sent)}</td>
+              <td className="p-3 text-right num">{fmtNum(r.kpis.delivered)}</td>
+              <td className="p-3 text-right num">{fmtNum(r.kpis.unique_replies)}</td>
+              <td className="p-3 text-right num">{fmtRate(r.kpis.reply_rate)}</td>
+              <td className="p-3 text-right num">{fmtNum(r.kpis.opt_outs)}</td>
+              <td className="p-3 text-right num">{fmtNum(r.snapshot.leads)}</td>
+              <td className="p-3 text-right num">{fmtNum(r.snapshot.unread)}</td>
+              <td className="p-3 text-right num">{fmtNum(r.snapshot.active_campaigns)}</td>
+            </tr>)}
+            {data.markets.length === 0 && <tr><td colSpan="10"><Empty icon="markets" title="No markets" body="Add a market from Integrations." /></td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </>}
   </div>;
 }
 
 /* --------------------------- admin: users ------------------------------- */
 function Users({ markets, say, refresh }) {
-  const [users, setUsers] = useState([]);
+  const [users, setUsers] = useState(null);
   const [edit, setEdit] = useState(null);
   const load = () => api("/users").then(setUsers);
-  useEffect(load, []);
-  return <div className="fade-in max-w-3xl">
-    <div className="flex justify-between mb-3">
-      <p className="text-sm text-slate-400">Each sales rep gets a login and only sees the markets you assign them.</p>
-      <Btn onClick={()=>setEdit({ name:"", email:"", password:"", role:"rep", markets:[] })}>+ Add rep</Btn>
+  useEffect(() => { load(); }, []);
+  return <div className="fade-in max-w-4xl">
+    <PageHeader title="Team" subtitle="Reps only see the markets you assign. Admins see every market." actions={<Btn onClick={() => setEdit({ name: "", email: "", password: "", role: "rep", markets: [] })}>Add rep</Btn>} />
+    <div className={`${cardCls} overflow-hidden`}>
+      {users === null ? <div className="p-4"><Skeleton className="h-24" /></div> : <div className="overflow-x-auto">
+        <table className="w-full text-[13px] min-w-[640px]">
+          <thead className="text-left text-[11px] uppercase tracking-wide text-slate-500"><tr><th className="p-3">Name</th><th className="p-3">Email</th><th className="p-3">Role</th><th className="p-3">Markets</th><th></th></tr></thead>
+          <tbody>{users.map(u => <tr key={u.id} className="border-t border-white/[0.06]">
+            <td className="p-3 font-medium text-white">{u.name}</td>
+            <td className="p-3 text-slate-300">{u.email}</td>
+            <td className="p-3"><span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase text-white ${u.role === "admin" ? "bg-purple-600" : "bg-slate-600"}`}>{u.role}</span></td>
+            <td className="p-3 text-xs text-slate-400">{u.role === "admin" ? "All markets" : u.markets.map(id => markets.find(m => m.id === id)?.name).filter(Boolean).join(", ") || "None"}</td>
+            <td className="p-3 text-right whitespace-nowrap">
+              <Btn kind="ghost" small onClick={() => setEdit({ ...u, password: "" })}>Edit</Btn>{" "}
+              <Btn kind="danger" small onClick={async () => { if (!confirm("Delete this user?")) return; await api(`/users/${u.id}`, { method: "DELETE" }); load(); }}>Delete</Btn>
+            </td>
+          </tr>)}</tbody>
+        </table>
+      </div>}
     </div>
-    <Card className="p-0">
-      <table className="w-full text-sm">
-        <thead><tr className="text-left text-xs text-slate-400 border-b border-slate-700"><th className="p-3">Name</th><th className="p-3">Email</th><th className="p-3">Role</th><th className="p-3">Markets</th><th></th></tr></thead>
-        <tbody>{users.map(u => <tr key={u.id} className="border-b border-slate-800">
-          <td className="p-3 font-semibold text-white">{u.name}</td><td className="p-3 text-slate-300">{u.email}</td>
-          <td className="p-3"><span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase text-white ${u.role==="admin"?"bg-purple-600":"bg-slate-600"}`}>{u.role}</span></td>
-          <td className="p-3 text-xs text-slate-400">{u.role==="admin"?"all":u.markets.map(id=>markets.find(m=>m.id===id)?.name).filter(Boolean).join(", ")||"none"}</td>
-          <td className="p-3 text-right">
-            <Btn kind="ghost" small onClick={()=>setEdit({...u, password:""})}>Edit</Btn>{" "}
-            <Btn kind="danger" small onClick={async()=>{ if(!confirm("Delete user?"))return; await api(`/users/${u.id}`,{method:"DELETE"}); load(); }}>✕</Btn>
-          </td>
-        </tr>)}</tbody>
-      </table>
-    </Card>
-    {edit && <Modal title={edit.id?"Edit user":"Add sales rep"} onClose={()=>setEdit(null)}>
-      <Label>Name</Label><Input value={edit.name} onChange={e=>setEdit({...edit,name:e.target.value})} />
-      {!edit.id && <><Label>Email (their login)</Label><Input value={edit.email} onChange={e=>setEdit({...edit,email:e.target.value})} /></>}
-      <Label>{edit.id?"New password (leave blank to keep)":"Password"}</Label><Input type="password" value={edit.password} onChange={e=>setEdit({...edit,password:e.target.value})} />
-      <Label>Role</Label><Sel value={edit.role} onChange={e=>setEdit({...edit,role:e.target.value})}><option value="rep">Rep (assigned markets only)</option><option value="admin">Admin (everything)</option></Sel>
-      {edit.role==="rep" && <><Label>Markets</Label>
+    {edit && <Modal title={edit.id ? "Edit user" : "Add a rep"} onClose={() => setEdit(null)}>
+      <Label>Name</Label><Input value={edit.name} onChange={e => setEdit({ ...edit, name: e.target.value })} />
+      {!edit.id && <><Label>Email</Label><Input value={edit.email} onChange={e => setEdit({ ...edit, email: e.target.value })} /></>}
+      <Label>{edit.id ? "New password (blank keeps the current one)" : "Password"}</Label><Input type="password" value={edit.password} onChange={e => setEdit({ ...edit, password: e.target.value })} />
+      <Label>Role</Label><Sel value={edit.role} onChange={e => setEdit({ ...edit, role: e.target.value })}><option value="rep">Rep — assigned markets only</option><option value="admin">Admin — everything</option></Sel>
+      {edit.role === "rep" && <><Label>Markets</Label>
         <div className="space-y-1">{markets.map(m => <label key={m.id} className="flex items-center gap-2 text-sm text-slate-300">
-          <input type="checkbox" checked={edit.markets.includes(m.id)} onChange={e=>setEdit({...edit, markets: e.target.checked?[...edit.markets,m.id]:edit.markets.filter(x=>x!==m.id)})} />
-          <span className="w-2 h-2 rounded-full" style={{background:m.color}}></span>{m.name}</label>)}</div></>}
-      <div className="mt-4"><Btn onClick={async()=>{
+          <input type="checkbox" checked={edit.markets.includes(m.id)} onChange={e => setEdit({ ...edit, markets: e.target.checked ? [...edit.markets, m.id] : edit.markets.filter(x => x !== m.id) })} />
+          <span className="w-2 h-2 rounded-full" style={{ background: m.color }}></span>{m.name}</label>)}</div></>}
+      <div className="mt-4"><Btn onClick={async () => {
         try {
-          if (edit.id) await api(`/users/${edit.id}`,{method:"PUT",body:{name:edit.name,role:edit.role,markets:edit.markets,password:edit.password||undefined}});
-          else await api("/users",{method:"POST",body:edit});
+          if (edit.id) await api(`/users/${edit.id}`, { method: "PUT", body: { name: edit.name, role: edit.role, markets: edit.markets, password: edit.password || undefined } });
+          else await api("/users", { method: "POST", body: edit });
           setEdit(null); say("User saved"); load(); refresh();
-        } catch(e){ say("⚠️ "+e.message); }
+        } catch (e) { say(e.message); }
       }}>Save</Btn></div>
     </Modal>}
   </div>;
@@ -755,48 +1169,200 @@ function Users({ markets, say, refresh }) {
 /* ----------------------- admin: integrations ---------------------------- */
 function GlobalSettings({ say }) {
   const [s, setS] = useState(null);
-  const [smtp, setSmtp] = useState({ host:"", port:587, user:"", pass:"" });
-  const [newMarket, setNewMarket] = useState({ name:"", color:"#f59e0b" });
-  useEffect(() => { api("/settings").then(j => { setS(j); try { const p = JSON.parse(j.smtp_json||"null"); if (p) setSmtp(p); } catch{} }); }, []);
-  if (!s) return <div className="text-slate-500">Loading…</div>;
-  const save = async () => { await api("/settings", { method:"PUT", body:{ ...s, smtp_json: smtp.host ? JSON.stringify(smtp) : "" } }); say("Integrations saved"); };
-  return <div className="max-w-2xl space-y-4 fade-in">
-    <Card>
-      <h2 className="font-bold text-white mb-1">📱 Twilio (SMS)</h2>
-      <p className="text-xs text-slate-400">From <a className="text-blue-400 underline" href="https://console.twilio.com" target="_blank">console.twilio.com</a>. One account powers all markets; numbers are assigned per-market in Market Setup.</p>
-      <Label>Account SID</Label><Input value={s.twilio_sid} onChange={e=>setS({...s,twilio_sid:e.target.value})} placeholder="AC…" />
-      <Label>Auth Token</Label><Input type="password" value={s.twilio_token} onChange={e=>setS({...s,twilio_token:e.target.value})} />
-    </Card>
-    <Card>
-      <h2 className="font-bold text-white mb-1">✉️ Email — SendGrid (primary)</h2>
-      <p className="text-xs text-slate-400">SendGrid is Twilio's email arm. Create an API key at app.sendgrid.com → Settings → API Keys, and verify your sending domain.</p>
-      <Label>SendGrid API key</Label><Input type="password" value={s.sendgrid_key} onChange={e=>setS({...s,sendgrid_key:e.target.value})} placeholder="SG.…" />
-      <h3 className="font-semibold text-slate-300 mt-4 text-sm">SMTP fallback (used only if SendGrid key is blank)</h3>
-      <div className="grid grid-cols-2 gap-2 mt-1">
-        <Input placeholder="SMTP host" value={smtp.host} onChange={e=>setSmtp({...smtp,host:e.target.value})} />
-        <Input placeholder="Port (587)" value={smtp.port} onChange={e=>setSmtp({...smtp,port:e.target.value})} />
-        <Input placeholder="Username" value={smtp.user} onChange={e=>setSmtp({...smtp,user:e.target.value})} />
-        <Input type="password" placeholder="Password" value={smtp.pass} onChange={e=>setSmtp({...smtp,pass:e.target.value})} />
-      </div>
-    </Card>
-    <Card>
-      <h2 className="font-bold text-white mb-1">🌐 Public URL</h2>
-      <p className="text-xs text-slate-400">Where this server is reachable (e.g. https://lariat.up.railway.app). Needed for inbound SMS, delivery receipts, and email unsubscribe links. Set each Twilio number's webhook to <code className="text-blue-300">[public URL]/webhooks/twilio/sms</code>.</p>
-      <Label>Public URL</Label><Input value={s.public_url} onChange={e=>setS({...s,public_url:e.target.value})} placeholder="https://…" />
-    </Card>
-    <div className="flex gap-2">
-      <Btn onClick={save}>Save all integrations</Btn>
-      <Btn kind="ghost" onClick={()=>window.open(`/api/export?token=${TOKEN}`)}>⬇ Download full backup</Btn>
+  const [smtp, setSmtp] = useState({ host: "", port: 587, user: "", pass: "" });
+  const [newMarket, setNewMarket] = useState({ name: "", color: "#f59e0b" });
+  const [a2pTick, setA2pTick] = useState(0);
+  useEffect(() => { api("/settings").then(j => { setS(j); try { const p = JSON.parse(j.smtp_json || "null"); if (p) setSmtp(p); } catch {} }); }, []);
+  if (!s) return <div className="space-y-3 fade-in"><PageHeader title="Integrations" subtitle="Loading credentials…" /><Skeleton className="h-40" /><Skeleton className="h-40" /></div>;
+  const save = async () => {
+    await api("/settings", { method: "PUT", body: { ...s, smtp_json: smtp.host ? JSON.stringify(smtp) : "" } });
+    say("Integrations saved");
+    setA2pTick(n => n + 1);
+  };
+  return <div className="space-y-4 fade-in max-w-6xl">
+    <PageHeader title="Integrations" subtitle="Twilio, email, and the public URL this server gives to webhooks." actions={<>
+      <Btn onClick={save}>Save integrations</Btn>
+      <Btn kind="ghost" onClick={() => window.open(`/api/export?token=${TOKEN}`)}>Download backup</Btn>
+    </>} />
+    <div className="grid lg:grid-cols-2 gap-4">
+      <Card>
+        <h2 className="font-semibold text-white">Twilio</h2>
+        <p className="text-xs text-slate-400 mt-1">One account sends for every market. Assign numbers per market in Market Setup. <a className="text-blue-300 underline" href="https://console.twilio.com" target="_blank" rel="noreferrer">Open the Twilio Console</a>.</p>
+        <Label>Account SID</Label><Input value={s.twilio_sid} onChange={e => setS({ ...s, twilio_sid: e.target.value })} placeholder="AC…" autoComplete="off" />
+        <Label>Auth token</Label><Input type="password" value={s.twilio_token} onChange={e => setS({ ...s, twilio_token: e.target.value })} autoComplete="off" />
+      </Card>
+      <Card>
+        <h2 className="font-semibold text-white">Public URL</h2>
+        <p className="text-xs text-slate-400 mt-1">The https address of this server. Inbound SMS, delivery receipts, and email unsubscribe links need it.</p>
+        <Label>Public URL</Label><Input value={s.public_url} onChange={e => setS({ ...s, public_url: e.target.value })} placeholder="https://…" />
+        <p className="text-[11px] text-slate-500 mt-2">Inbound webhook: <span className="text-blue-200">{(s.public_url || "").replace(/\/$/, "") || "https://your-host"}/webhooks/twilio/sms</span></p>
+      </Card>
     </div>
     <Card>
-      <h2 className="font-bold text-white mb-1">➕ Add a market</h2>
-      <div className="flex gap-2 items-end">
-        <div className="flex-1"><Label>Name</Label><Input value={newMarket.name} onChange={e=>setNewMarket({...newMarket,name:e.target.value})} placeholder="e.g. Phoenix Land" /></div>
-        <div><Label>Color</Label><input type="color" value={newMarket.color} onChange={e=>setNewMarket({...newMarket,color:e.target.value})} className="h-10 w-16 bg-transparent" /></div>
-        <Btn onClick={async()=>{ if(!newMarket.name)return; await api("/markets",{method:"POST",body:newMarket}); say("Market added — reload to see it"); setTimeout(()=>location.reload(), 800); }}>Add</Btn>
+      <h2 className="font-semibold text-white">Email</h2>
+      <p className="text-xs text-slate-400 mt-1">SendGrid is used when an API key is saved. SMTP is the fallback when the key is blank. Authenticate the sending domain before you raise volume.</p>
+      <Label>SendGrid API key</Label><Input type="password" value={s.sendgrid_key} onChange={e => setS({ ...s, sendgrid_key: e.target.value })} placeholder="SG.…" autoComplete="off" />
+      <h3 className="font-medium text-slate-300 mt-4 text-sm">SMTP fallback</h3>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-1">
+        <Input placeholder="SMTP host" value={smtp.host} onChange={e => setSmtp({ ...smtp, host: e.target.value })} />
+        <Input placeholder="Port (587)" value={smtp.port} onChange={e => setSmtp({ ...smtp, port: e.target.value })} />
+        <Input placeholder="Username" value={smtp.user} onChange={e => setSmtp({ ...smtp, user: e.target.value })} />
+        <Input type="password" placeholder="Password" value={smtp.pass} onChange={e => setSmtp({ ...smtp, pass: e.target.value })} />
+      </div>
+    </Card>
+    <A2PPanel say={say} refreshKey={a2pTick} />
+    <Card>
+      <h2 className="font-semibold text-white mb-1">Add a market</h2>
+      <div className="flex flex-wrap gap-2 items-end">
+        <div className="flex-1 min-w-[200px]"><Label>Name</Label><Input value={newMarket.name} onChange={e => setNewMarket({ ...newMarket, name: e.target.value })} placeholder="Phoenix land" /></div>
+        <div><Label>Color</Label><input type="color" value={newMarket.color} onChange={e => setNewMarket({ ...newMarket, color: e.target.value })} className="h-10 w-16 bg-transparent" /></div>
+        <Btn onClick={async () => { if (!newMarket.name) return; await api("/markets", { method: "POST", body: newMarket }); say("Market added"); setTimeout(() => location.reload(), 600); }}>Add market</Btn>
       </div>
     </Card>
   </div>;
+}
+
+const WEBHOOK_LABEL = { match: "Matches Public URL", mismatch: "Does not match Public URL", no_public_url: "Set Public URL", not_in_account: "Not on this Twilio account", unknown: "Unknown" };
+function A2PPanel({ say, refreshKey }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState("");
+  const load = refresh => {
+    setLoading(true); setErr("");
+    api("/compliance/a2p" + (refresh ? "?refresh=1" : ""))
+      .then(setData).catch(e => setErr(e.message)).finally(() => setLoading(false));
+  };
+  useEffect(() => { load(false); }, [refreshKey]);
+  const copyHook = async () => {
+    const text = (data && data.webhook_url) || "/webhooks/twilio/sms";
+    try { await navigator.clipboard.writeText(text); say("Webhook URL copied"); }
+    catch { say(text); }
+  };
+  return <section className="space-y-3">
+    <div className="flex flex-wrap items-end justify-between gap-3">
+      <div>
+        <h2 className="text-lg font-semibold text-white">A2P 10DLC compliance</h2>
+        <p className="text-sm text-slate-400 mt-1 max-w-3xl">Read-only Brand, Campaign, and Messaging Service status. Lariat does not submit or approve registrations.</p>
+      </div>
+      <Btn kind="ghost" disabled={loading} onClick={() => load(true)}>{loading ? "Checking…" : "Refresh status"}</Btn>
+    </div>
+    {loading && !data && <div className="space-y-3"><Skeleton className="h-24" /><Skeleton className="h-40" /></div>}
+    {err && <Card className="text-rose-300 text-sm">{err}</Card>}
+    {data && <>
+      <div className="rounded-2xl border border-blue-400/20 bg-blue-500/10 px-4 py-3 text-sm text-blue-100">{data.disclaimer}</div>
+      {!data.configured && <div className={cardCls + " p-6"}>
+        <h3 className="font-semibold text-white">Connect Twilio to load registration status</h3>
+        <p className="text-sm text-slate-400 mt-1 max-w-2xl">Save an Account SID and Auth Token above. Until then, this panel can still show the quiet-hours, STOP, and cap checklist for each market. Brand and campaign approval stays in the Twilio Console either way.</p>
+        <ol className="mt-4 space-y-2 text-sm text-slate-300 list-decimal pl-5">
+          <li>Paste the Account SID and auth token, then save.</li>
+          <li>Set the Public URL so inbound texts and delivery receipts have somewhere to land.</li>
+          <li>In Twilio, register a Brand and a Campaign, and attach numbers to a Messaging Service.</li>
+          <li>Come back and refresh. Lariat will show status and the next thing to do in the Console.</li>
+        </ol>
+      </div>}
+      <div className="grid md:grid-cols-2 gap-3">
+        {(data.next_actions || []).map((a, i) => <div key={i} className={`rounded-2xl border px-4 py-3 ${a.level === "pass" ? "border-emerald-400/25 bg-emerald-500/10" : a.level === "info" ? "border-white/10 bg-white/[0.03]" : "border-amber-400/25 bg-amber-500/10"}`}>
+          <div className="text-sm font-semibold text-white">{a.title}</div>
+          <p className="text-xs text-slate-300 mt-1 leading-relaxed">{a.detail}</p>
+          {a.href && <a className="inline-block mt-2 text-xs text-blue-300 underline" href={a.href} target="_blank" rel="noreferrer">Open in Twilio</a>}
+        </div>)}
+      </div>
+      <Card>
+        <div className="text-sm font-semibold text-white">Webhook to give Twilio</div>
+        <p className="text-xs text-slate-400 mt-1">On each number, or on the Messaging Service, set “A message comes in” to this URL with HTTP POST. Lariat sends delivery callbacks to the status URL automatically once Public URL is set.</p>
+        <div className="mt-3 rounded-lg border border-white/10 bg-[#0b1222] px-3 py-2 flex items-center gap-2">
+          <code className="text-xs text-blue-200 truncate flex-1">{data.webhook_url || "/webhooks/twilio/sms"}</code>
+          <Btn small kind="ghost" onClick={copyHook}>Copy</Btn>
+        </div>
+        <p className="text-[11px] text-slate-500 mt-2">Status callback: {data.status_callback_url || "/webhooks/twilio/status"}{data.fetched_at ? ` · Last read ${fmtDate(data.fetched_at)}` : ""}</p>
+      </Card>
+      {data.errors && data.errors.length > 0 && <div className="rounded-2xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+        Twilio returned {data.errors.length} read error{data.errors.length === 1 ? "" : "s"}. Anything that did load is still shown.
+        <ul className="mt-1 text-xs space-y-0.5 text-amber-50/80">{data.errors.map((e, i) => <li key={i}>{e.scope}{e.service ? ` ${e.service}` : ""}: {e.message}</li>)}</ul>
+      </div>}
+      {data.configured && <div className="grid lg:grid-cols-2 gap-3">
+        <div className="space-y-3">
+          <h3 className="text-sm font-semibold text-white">Brands</h3>
+          {data.brands.length === 0 && <Card className="text-sm text-slate-400">No Brand registrations returned. If you have not started one, register it in the Twilio Console. Lariat will not file it.</Card>}
+          {data.brands.map(b => <Card key={b.sid}>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-[11px] uppercase tracking-wide text-slate-500">Brand</div>
+                <div className="font-semibold text-white">{b.tcr_id || b.sid}</div>
+                <div className="text-xs text-slate-500 mt-1">{[b.brand_type && prettyToken(b.brand_type), b.identity_status && prettyToken(b.identity_status), b.brand_score != null && `Score ${b.brand_score}`].filter(Boolean).join(" · ")}</div>
+                {b.date_updated && <div className="text-[11px] text-slate-500 mt-1">Updated {fmtDate(b.date_updated)}</div>}
+              </div>
+              <StatusPill status={b.status} />
+            </div>
+            {b.failure_reason && <p className="text-xs text-rose-300 mt-2">{b.failure_reason}</p>}
+            <a className="inline-block mt-2 text-xs text-blue-300 underline" href={data.docs.brands} target="_blank" rel="noreferrer">Review in Console</a>
+          </Card>)}
+        </div>
+        <div className="space-y-3">
+          <h3 className="text-sm font-semibold text-white">Messaging Services</h3>
+          {data.messaging_services.length === 0 && <Card className="text-sm text-slate-400">No Messaging Services returned. Campaigns and number pools attach to a service in the Twilio Console.</Card>}
+          {data.messaging_services.map(s => <Card key={s.sid}>
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="font-semibold text-white">{s.friendly_name}</div>
+                <div className="text-[11px] text-slate-500 font-mono truncate">{s.sid}</div>
+              </div>
+              <StatusPill status={s.us_app_to_person_registered ? "REGISTERED" : "NOT REGISTERED"} />
+            </div>
+            <div className="text-xs text-slate-400 mt-2">{s.phone_numbers.length} number{s.phone_numbers.length === 1 ? "" : "s"} on this service · inbound {WEBHOOK_LABEL[s.inbound_webhook] || "Unknown"}</div>
+            {s.campaigns.length === 0 && <p className="text-xs text-slate-500 mt-2">No Usa2p campaign on this service yet.</p>}
+            <div className="mt-2 space-y-2">{s.campaigns.map(c => <div key={c.sid} className="rounded-lg border border-white/10 bg-[#0b1222] px-3 py-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-sm text-white">{c.campaign_id || c.sid}</div>
+                <StatusPill status={c.campaign_status} />
+              </div>
+              <div className="text-[11px] text-slate-500 mt-1">{prettyToken(c.usecase)}{c.description ? ` · ${c.description}` : ""}</div>
+              {c.errors && c.errors.length > 0 && <div className="text-[11px] text-rose-300 mt-1">{c.errors[0]}</div>}
+            </div>)}</div>
+            <a className="inline-block mt-2 text-xs text-blue-300 underline" href={data.docs.services} target="_blank" rel="noreferrer">Open Messaging Services</a>
+          </Card>)}
+        </div>
+      </div>}
+      {data.configured && <div className={`${cardCls} overflow-hidden`}>
+        <div className="px-4 pt-4 pb-2">
+          <h3 className="text-sm font-semibold text-white">Market numbers</h3>
+          <p className="text-xs text-slate-500 mt-1">Compared with Messaging Service membership and the inbound webhook on the Twilio number.</p>
+        </div>
+        {data.numbers.length === 0 ? <Empty icon="settings" title="No numbers on markets yet" body="Add sending numbers in Market Setup. This table will show whether each one sits on a Messaging Service." /> : <div className="overflow-x-auto">
+          <table className="w-full text-[13px] min-w-[720px]">
+            <thead className="text-left text-[11px] uppercase tracking-wide text-slate-500"><tr>
+              <th className="p-3">Number</th><th className="p-3">Market</th><th className="p-3">Messaging Service</th><th className="p-3">Inbound webhook</th>
+            </tr></thead>
+            <tbody>{data.numbers.map((n, i) => <tr key={n.market_id + n.phone_number + i} className="border-t border-white/[0.06]">
+              <td className="p-3 text-white num">{n.phone_number}</td>
+              <td className="p-3 text-slate-300"><span className="inline-block w-2 h-2 rounded-full mr-1.5" style={{ background: n.market_color }}></span>{n.market_name}</td>
+              <td className="p-3 text-slate-300">{n.messaging_service_name || <span className="text-amber-200">Not attached</span>}</td>
+              <td className="p-3"><StatusPill status={n.webhook === "match" ? "MATCH" : n.webhook === "mismatch" ? "MISMATCH" : "PENDING"} /> <span className="text-[11px] text-slate-500 ml-1">{WEBHOOK_LABEL[n.webhook]}</span></td>
+            </tr>)}</tbody>
+          </table>
+        </div>}
+      </div>}
+      <div>
+        <h3 className="text-sm font-semibold text-white mb-2">Guardrails by market</h3>
+        <div className="grid lg:grid-cols-2 gap-3">
+          {(data.markets || []).map(m => <Card key={m.market_id}>
+            <div className="flex items-center justify-between gap-2 mb-1">
+              <div className="font-medium text-white"><span className="inline-block w-2.5 h-2.5 rounded-full mr-2" style={{ background: m.color }}></span>{m.name}</div>
+              <span className={`text-xs font-semibold ${m.passing === m.total ? "text-emerald-300" : "text-amber-200"}`}>{m.passing}/{m.total}</span>
+            </div>
+            {m.checks.map(c => <CheckItem key={c.id} check={c} />)}
+          </Card>)}
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
+        <a className="text-blue-300 underline" href={data.docs.a2p} target="_blank" rel="noreferrer">A2P 10DLC docs</a>
+        <a className="text-blue-300 underline" href={data.docs.console} target="_blank" rel="noreferrer">Regulatory Compliance</a>
+        <a className="text-blue-300 underline" href={data.docs.brands} target="_blank" rel="noreferrer">Brands</a>
+        <a className="text-blue-300 underline" href={data.docs.campaigns} target="_blank" rel="noreferrer">Campaigns</a>
+        <a className="text-blue-300 underline" href={data.docs.services} target="_blank" rel="noreferrer">Messaging Services</a>
+      </div>
+    </>}
+  </section>;
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App />);
