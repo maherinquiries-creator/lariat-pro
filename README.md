@@ -2,6 +2,8 @@
 
 Lariat Pro is a full-stack, multi-market SMS + cold-email outreach platform. One server, one database, logins for every sales rep, and fully walled-off market workspaces (Land, Vegas Realtors, Homeowners, Dispo — add as many as you want).
 
+Production data lives in **Postgres** (Supabase). Render's free filesystem is wiped on every restart, so the app reads `DATABASE_URL` and keeps users, markets, leads, messages, settings, and sessions in Postgres. When `DATABASE_URL` is unset, it falls back to a local SQLite file for development.
+
 ## What's in the box
 
 - **Markets (workspaces)** — each market has its own leads, campaigns, inbox, phone number pool, templates, quick replies, opt-out list, email identity, caps and quiet hours. A rep assigned to "Dispo" never sees "Land."
@@ -14,7 +16,7 @@ Lariat Pro is a full-stack, multi-market SMS + cold-email outreach platform. One
 
 ## 1. Run it locally (5 minutes)
 
-Requires Node.js 20+ (nodejs.org). Node 22+ can use the built-in `node:sqlite` driver; otherwise the server uses `better-sqlite3`.
+Requires Node.js 20+.
 
 ```bash
 cd lariat-pro
@@ -22,19 +24,42 @@ npm install
 npm start
 ```
 
-Open http://localhost:3000 — the first screen creates your admin account and your four starter markets.
+With no `DATABASE_URL`, the server uses SQLite (`better-sqlite3`, or Node 22's `node:sqlite` if the native module did not build). The file is `lariat.db` next to `server.js` (or `$DATA_DIR/lariat.db`).
 
-> The database is a single file, `lariat.db`, created next to server.js. Back it up like any file.
+Open http://localhost:3000 — the first screen creates your admin account. The four starter markets (Land, Vegas Realtors, Homeowners, Dispo) are created on boot and are not duplicated if they already exist.
+
+To point local dev at Postgres instead:
+
+```bash
+export DATABASE_URL="postgresql://USER:PASSWORD@127.0.0.1:5432/lariat"
+npm start
+```
+
+The app turns SSL on (`rejectUnauthorized: false`) for any host other than localhost. Supabase requires that.
 
 ## 2. Deploy it (so reps can log in and texts flow in 24/7)
 
-Any Node host works. Easiest options:
+**Supabase** (database): create a project → Project Settings → Database → copy the URI connection string (direct connection on port 5432, or the session pooler). That value is `DATABASE_URL`. Tables are created on boot. Row level security is enabled with no Data API policies, so the public Supabase API cannot read them; the app connects as the database owner, which bypasses RLS.
 
-**Railway** (railway.app): new project → Deploy from GitHub (or `railway up` with their CLI from this folder). Add a **volume** mounted at `/data` and set env var `DATA_DIR=/data` so the database survives redeploys. It gives you a public URL like `https://lariat-pro.up.railway.app`.
+**Render** free web service (`render.yaml`): build `npm install`, start `npm start`, **no disk**. In the Dashboard, set:
 
-**Render** (render.com): new Web Service → build `npm install`, start `npm start`, add a persistent disk, set `DATA_DIR` to the disk path.
+| Variable | Purpose |
+|---|---|
+| `DATABASE_URL` | Supabase Postgres URI. Required. Data is lost on spin-down without it. |
+| `LARIAT_ADMIN_EMAIL` | If this email has no user yet, it is created as admin on boot. |
+| `LARIAT_ADMIN_PASSWORD` | Password for that admin. Hashed the same way as other users. |
+| `TWILIO_ACCOUNT_SID` | Used when Integrations has no saved Account SID. |
+| `TWILIO_AUTH_TOKEN` | Used when Integrations has no saved auth token. Masked in GET `/api/settings`. |
+| `SENDGRID_API_KEY` | Used when Integrations has no saved SendGrid key. Masked the same way. |
+| `PUBLIC_URL` | Used when Integrations has no saved public URL, e.g. `https://lariat-pro.onrender.com`. |
 
-After deploying, open the app → **Integrations** → set **Public URL** to your deployed URL.
+`sync: false` on those keys means a Blueprint sync will not overwrite values you paste in the Dashboard. A saved Integrations value wins over the matching env var. Saving the masked token placeholder does not replace the env-sourced secret.
+
+Free web services sleep after inactivity. Postgres keeps the data; the next request cold-starts the app.
+
+After deploying, open the app → **Integrations** → set **Public URL** to your deployed URL (or set `PUBLIC_URL`).
+
+**Railway** works the same way: set `DATABASE_URL` to the Supabase URI. A volume is not required.
 
 ## 3. Connect Twilio (SMS)
 
@@ -98,12 +123,15 @@ Counts use the time the message or opt-out row was created, not a separate event
 | Thing | File |
 |---|---|
 | Server + API + queue engine | `server.js` |
+| Postgres / SQLite adapter | `db.js` |
 | Entire UI | `public/index.html` |
-| Database | `lariat.db` (or `$DATA_DIR/lariat.db`) |
+| Database | Postgres via `DATABASE_URL`, or `lariat.db` when that variable is unset |
 
 ## Troubleshooting
 
-- **Sends fail with "Twilio not configured"** — fill in Integrations and make sure the market has numbers in Market Setup.
+- **Sends fail with "Twilio not configured"** — fill in Integrations or set `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN`, and make sure the market has numbers in Market Setup.
+- **Logins or leads vanish after a Render restart** — `DATABASE_URL` is missing, so the app fell back to SQLite on the ephemeral disk. Set the Supabase URI and redeploy.
+- **Database startup failed** — the URI is wrong, the database is paused, or the host needs SSL. Local Postgres on `127.0.0.1` is the one case that connects without SSL.
 - **No inbound texts** — the Twilio number's webhook isn't pointed at `/webhooks/twilio/sms`, or Public URL is wrong.
 - **Delivery % shows 0** — delivery receipts need the Public URL set (the app passes a StatusCallback automatically once it is).
 - **A2P panel says Twilio rejected the credentials** — the Account SID or auth token is wrong. Brand and campaign registration itself still happens in the Twilio Console.
