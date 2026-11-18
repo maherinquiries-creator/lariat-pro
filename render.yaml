@@ -1,16 +1,27 @@
+# Lariat Pro on Render's free web service. The filesystem is ephemeral, so all
+# data lives in Postgres (Supabase). Paste that URI into DATABASE_URL in the
+# dashboard — sync:false keeps the value from being overwritten on blueprint sync.
 services:
   - type: web
     name: lariat-pro
     runtime: node
-    plan: starter
+    plan: free
     buildCommand: npm install
     startCommand: npm start
     envVars:
-      - key: DATA_DIR
-        value: /var/data
       - key: NODE_VERSION
         value: "22"
-    disk:
-      name: lariat-data
-      mountPath: /var/data
-      sizeGB: 1
+      - key: DATABASE_URL
+        sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: SENDGRID_API_KEY
+        sync: false
+      - key: PUBLIC_URL
+        sync: false
+      - key: LARIAT_ADMIN_EMAIL
+        sync: false
+      - key: LARIAT_ADMIN_PASSWORD
+        sync: false
